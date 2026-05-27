@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import * as XLSX from "xlsx";
 import { initializeApp } from "firebase/app";
-import { getDatabase, ref, onValue, set, remove } from "firebase/database";
+import { getDatabase, ref as dbRef, onValue, set } from "firebase/database";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDbxbu1w9VSapEWT2ApUvvPBz5xUdj29vU",
@@ -124,8 +124,8 @@ export default function App() {
 
   // Load from Firebase on mount
   useEffect(() => {
-    const stockRef = ref(db, "stock");
-    const ordersRef = ref(db, "orders");
+    const stockRef = dbRef(db, "stock");
+    const ordersRef = dbRef(db, "orders");
     let stockLoaded = false, ordersLoaded = false;
     const checkReady = () => { if (stockLoaded && ordersLoaded) setDbReady(true); };
     const unsubStock = onValue(stockRef, snap => {
@@ -145,14 +145,14 @@ export default function App() {
   const saveStock = useCallback((newStock) => {
     const obj = {};
     newStock.forEach((s, i) => { obj[s.barcode.replace(/[.#$/[\]]/g, "_")] = s; });
-    set(ref(db, "stock"), obj);
+    set(dbRef(db, "stock"), obj);
   }, []);
 
   // Save orders to Firebase
   const saveOrders = useCallback((newOrders) => {
     const obj = {};
     newOrders.forEach(o => { obj[o.id] = o; });
-    set(ref(db, "orders"), obj);
+    set(dbRef(db, "orders"), obj);
   }, []);
 
   const showAlert = useCallback((msg, type = "success") => {
