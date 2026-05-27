@@ -1,5 +1,20 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import * as XLSX from "xlsx";
+import { initializeApp } from "firebase/app";
+import { getDatabase, ref, onValue, set, remove } from "firebase/database";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDbxbu1w9VSapEWT2ApUvvPBz5xUdj29vU",
+  authDomain: "warehouse-app-52001.firebaseapp.com",
+  databaseURL: "https://warehouse-app-52001-default-rtdb.firebaseio.com",
+  projectId: "warehouse-app-52001",
+  storageBucket: "warehouse-app-52001.firebasestorage.app",
+  messagingSenderId: "72442819990",
+  appId: "1:72442819990:web:b349bfe2bb1e08679259b7",
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
 
 const INITIAL_STOCK = [
   { barcode: "8851234567890", product: "สินค้า A", stock: 120, location: "A01-01" },
@@ -81,12 +96,9 @@ const btnRed = { ...btnPrimary, background: "#ff4d4f" };
 const btnGray = { ...btnPrimary, background: "#fff", color: "#595959", border: "1px solid #d9d9d9" };
 
 export default function App() {
-  const [stock, setStock] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("wh_stock")) || INITIAL_STOCK; } catch { return INITIAL_STOCK; }
-  });
-  const [orders, setOrders] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("wh_orders")) || INITIAL_ORDERS; } catch { return INITIAL_ORDERS; }
-  });
+  const [stock, setStock] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [dbReady, setDbReady] = useState(false);
 
   const [pickNo, setPickNo] = useState("");
   const [barcode, setBarcode] = useState("");
@@ -110,8 +122,38 @@ export default function App() {
   const barcodeRef = useRef();
   const pickNoRef = useRef();
 
-  useEffect(() => { localStorage.setItem("wh_stock", JSON.stringify(stock)); }, [stock]);
-  useEffect(() => { localStorage.setItem("wh_orders", JSON.stringify(orders)); }, [orders]);
+  // Load from Firebase on mount
+  useEffect(() => {
+    const stockRef = ref(db, "stock");
+    const ordersRef = ref(db, "orders");
+    let stockLoaded = false, ordersLoaded = false;
+    const checkReady = () => { if (stockLoaded && ordersLoaded) setDbReady(true); };
+    const unsubStock = onValue(stockRef, snap => {
+      const val = snap.val();
+      setStock(val ? Object.values(val) : []);
+      stockLoaded = true; checkReady();
+    });
+    const unsubOrders = onValue(ordersRef, snap => {
+      const val = snap.val();
+      setOrders(val ? Object.values(val) : []);
+      ordersLoaded = true; checkReady();
+    });
+    return () => { unsubStock(); unsubOrders(); };
+  }, []);
+
+  // Save stock to Firebase
+  const saveStock = useCallback((newStock) => {
+    const obj = {};
+    newStock.forEach((s, i) => { obj[s.barcode.replace(/[.#$/[\]]/g, "_")] = s; });
+    set(ref(db, "stock"), obj);
+  }, []);
+
+  // Save orders to Firebase
+  const saveOrders = useCallback((newOrders) => {
+    const obj = {};
+    newOrders.forEach(o => { obj[o.id] = o; });
+    set(ref(db, "orders"), obj);
+  }, []);
 
   const showAlert = useCallback((msg, type = "success") => {
     setAlert({ msg, type });
@@ -155,10 +197,10 @@ export default function App() {
     const pickQty = Number(qty) || 1;
     if (stockItem.stock < pickQty) { setScanStatus("❌ สต็อกไม่เพียงพอ"); setScanStatusColor("#ff4d4f"); return; }
 
-    setStock(prev => prev.map(s => s.barcode === barcode.trim() ? { ...s, stock: s.stock - pickQty } : s));
+    updateStock(prev => prev.map(s => s.barcode === barcode.trim() ? { ...s, stock: s.stock - pickQty } : s));
 
     if (matchedOrder) {
-      setOrders(prev => prev.map(o => o.id === matchedOrder.id
+      updateOrders(prev => prev.map(o => o.id === matchedOrder.id
         ? { ...o, picked: (o.picked || 0) + pickQty, status: (o.picked || 0) + pickQty >= o.required ? "COMPLETE" : o.status, completedAt: (o.picked || 0) + pickQty >= o.required ? now() : o.completedAt, completedAtRaw: (o.picked || 0) + pickQty >= o.required ? new Date().toISOString() : o.completedAtRaw }
         : o));
       setScanStatus(`✅ หยิบสำเร็จ: ${stockItem.product} x${pickQty}`);
@@ -212,8 +254,8 @@ export default function App() {
     reader.onload = ev => {
       try {
         const data = JSON.parse(ev.target.result);
-        if (data.stock) setStock(data.stock);
-        if (data.orders) setOrders(data.orders);
+        if (data.stock) updateStock(data.stock);
+        if (data.orders) updateOrders(data.orders);
         showAlert("Restore สำเร็จ");
       } catch { showAlert("ไฟล์ไม่ถูกต้อง", "error"); }
     };
@@ -226,10 +268,10 @@ export default function App() {
     if (!bc || !product || !st || !loc) { showAlert("กรุณากรอกข้อมูลให้ครบ", "error"); return; }
     const existing = stock.find(s => s.barcode === bc);
     if (existing) {
-      setStock(prev => prev.map(s => s.barcode === bc ? { ...s, stock: s.stock + Number(st), location: loc } : s));
+      updateStock(prev => prev.map(s => s.barcode === bc ? { ...s, stock: s.stock + Number(st), location: loc } : s));
       showAlert("อัพเดทสต็อกสำเร็จ");
     } else {
-      setStock(prev => [...prev, { barcode: bc, product, stock: Number(st), location: loc }]);
+      updateStock(prev => [...prev, { barcode: bc, product, stock: Number(st), location: loc }]);
       showAlert("เพิ่มสินค้าสำเร็จ");
     }
     setAddStockForm({ barcode: "", product: "", stock: "", location: "" });
@@ -244,18 +286,18 @@ export default function App() {
       location: loc, required: Number(required) || 1, picked: 0,
       status: "PENDING", createdAt: now(), createdAtRaw: new Date().toISOString(),
     };
-    setOrders(prev => [...prev, newOrder]);
+    updateOrders(prev => [...prev, newOrder]);
     setAddOrderForm({ pickNo: "", customer: "", barcode: "", product: "", location: "", required: 1 });
     showAlert("เพิ่ม Order สำเร็จ");
   }
 
   function handleEditStock() {
-    setStock(prev => prev.map(s => s.barcode === editStockItem.barcode ? editStockItem : s));
+    updateStock(prev => prev.map(s => s.barcode === editStockItem.barcode ? editStockItem : s));
     setEditStockItem(null); showAlert("แก้ไขสำเร็จ");
   }
 
   function handleEditOrder() {
-    setOrders(prev => prev.map(o => o.id === editOrderItem.id ? editOrderItem : o));
+    updateOrders(prev => prev.map(o => o.id === editOrderItem.id ? editOrderItem : o));
     setEditOrderItem(null); showAlert("แก้ไขสำเร็จ");
   }
 
@@ -345,7 +387,7 @@ export default function App() {
   function confirmXlsxImport() {
     if (!xlsxPreview) return;
     if (xlsxPreview.type === "stock") {
-      setStock(prev => {
+      updateStock(prev => {
         const updated = [...prev];
         xlsxPreview.rows.forEach(r => {
           const idx = updated.findIndex(s => s.barcode === r.barcode);
@@ -360,14 +402,42 @@ export default function App() {
         const id = generateId();
         return { id, pickNo: r.pickNo || id, customer: r.customer, barcode: r.barcode, product: r.product, location: r.location, required: r.required, picked: 0, status: "PENDING", createdAt: now(), createdAtRaw: new Date().toISOString() };
       });
-      setOrders(prev => [...prev, ...newOrders]);
+      updateOrders(prev => [...prev, ...newOrders]);
       showAlert(`นำเข้า Order สำเร็จ ${newOrders.length} รายการ`);
     }
     setXlsxPreview(null);
   }
 
+  const updateStock = useCallback((updater) => {
+    setStock(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      const obj = {};
+      next.forEach(s => { obj[s.barcode.replace(/[^a-zA-Z0-9_-]/g, "_")] = s; });
+      set(dbRef(db, "stock"), next.length ? obj : null);
+      return next;
+    });
+  }, []);
+
+  const updateOrders = useCallback((updater) => {
+    setOrders(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      const obj = {};
+      next.forEach(o => { obj[o.id] = o; });
+      set(dbRef(db, "orders"), next.length ? obj : null);
+      return next;
+    });
+  }, []);
+
   const sectionCard = { background: "#fff", borderRadius: 14, border: "1px solid #f0f0f0", padding: "22px 24px", marginBottom: 20, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" };
   const labelStyle = { fontSize: 13, color: "#595959", marginBottom: 4, display: "block" };
+
+  if (!dbReady) return (
+    <div style={{ background: "#f7f8fa", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16, fontFamily: "'Noto Sans Thai', sans-serif" }}>
+      <div style={{ fontSize: 40 }}>🔥</div>
+      <div style={{ fontSize: 18, fontWeight: 700, color: "#065A82" }}>กำลังเชื่อมต่อ Firebase...</div>
+      <div style={{ fontSize: 13, color: "#8c8c8c" }}>โหลดข้อมูล real-time จากฐานข้อมูลกลาง</div>
+    </div>
+  );
 
   return (
     <div style={{ background: "#f7f8fa", minHeight: "100vh", fontFamily: "'Noto Sans Thai', sans-serif", color: "#262626" }}>
@@ -512,7 +582,7 @@ export default function App() {
                       <td style={{ padding: "10px 12px" }}>
                         <div style={{ display: "flex", gap: 6 }}>
                           <button onClick={() => setEditOrderItem({ ...o })} style={{ ...btnGray, padding: "4px 10px", fontSize: 12 }}>✏️</button>
-                          <button onClick={() => { setOrders(prev => prev.filter(x => x.id !== o.id)); showAlert("ลบ Order แล้ว"); }} style={{ ...btnRed, padding: "4px 10px", fontSize: 12 }}>🗑️</button>
+                          <button onClick={() => { updateOrders(prev => prev.filter(x => x.id !== o.id)); showAlert("ลบ Order แล้ว"); }} style={{ ...btnRed, padding: "4px 10px", fontSize: 12 }}>🗑️</button>
                         </div>
                       </td>
                     </tr>
@@ -646,7 +716,7 @@ export default function App() {
             <div style={{ flex: 1 }}>
               <input style={{ ...inputStyle, maxWidth: 280 }} value={stockSearch} onChange={e => setStockSearch(e.target.value)} placeholder="ค้นหา Stock..." />
             </div>
-            <button style={btnRed} onClick={() => { if (window.confirm("ลบ Stock ทั้งหมด?")) { setStock([]); showAlert("ลบ Stock ทั้งหมดแล้ว"); } }}>🗑️ ลบทั้งหมด</button>
+            <button style={btnRed} onClick={() => { if (window.confirm("ลบ Stock ทั้งหมด?")) { updateStock([]); showAlert("ลบ Stock ทั้งหมดแล้ว"); } }}>🗑️ ลบทั้งหมด</button>
           </div>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
@@ -667,7 +737,7 @@ export default function App() {
                     <td style={{ padding: "10px 14px" }}>
                       <div style={{ display: "flex", gap: 8 }}>
                         <button onClick={() => setEditStockItem({ ...s })} style={{ ...btnPrimary, padding: "5px 14px", fontSize: 13 }}>✏️ แก้ไข</button>
-                        <button onClick={() => { setStock(prev => prev.filter(x => x.barcode !== s.barcode)); showAlert("ลบสินค้าแล้ว"); }} style={{ ...btnRed, padding: "5px 14px", fontSize: 13 }}>🗑️ ลบ</button>
+                        <button onClick={() => { updateStock(prev => prev.filter(x => x.barcode !== s.barcode)); showAlert("ลบสินค้าแล้ว"); }} style={{ ...btnRed, padding: "5px 14px", fontSize: 13 }}>🗑️ ลบ</button>
                       </div>
                     </td>
                   </tr>
@@ -775,7 +845,7 @@ export default function App() {
         <div style={{ display: "flex", gap: 10 }}>
           <button style={{ ...btnRed, flex: 1 }} onClick={() => {
             const today = new Date().toLocaleDateString("th-TH");
-            setOrders(prev => prev.filter(o => new Date(o.createdAtRaw).toLocaleDateString("th-TH") !== today));
+            updateOrders(prev => prev.filter(o => new Date(o.createdAtRaw).toLocaleDateString("th-TH") !== today));
             setConfirmClear(false); showAlert("ล้างข้อมูลวันนี้แล้ว");
           }}>ยืนยันล้างข้อมูล</button>
           <button style={{ ...btnGray, flex: 1 }} onClick={() => setConfirmClear(false)}>ยกเลิก</button>
