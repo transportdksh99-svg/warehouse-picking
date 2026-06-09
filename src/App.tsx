@@ -16,26 +16,20 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
-const INITIAL_STOCK = [
-  { barcode: "8851234567890", product: "สินค้า A", stock: 120, location: "A01-01" },
-  { barcode: "8851234567891", product: "สินค้า B", stock: 80, location: "A01-02" },
-  { barcode: "8851234567892", product: "สินค้า C", stock: 60, location: "A01-03" },
-  { barcode: "8851234567893", product: "สินค้า D", stock: 40, location: "A02-01" },
-  { barcode: "8851234567894", product: "สินค้า E", stock: 200, location: "B01-01" },
-];
-
-const INITIAL_ORDERS = [];
-
 function generateId() {
   return "PO" + Date.now().toString().slice(-6) + Math.floor(Math.random() * 100);
 }
 
 function now() {
   const d = new Date();
-  const pad = n => String(n).padStart(2, "0");
-  return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()+543} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear() + 543} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
+// ✅ กรอง undefined ออกก่อนส่ง Firebase
+function cleanObj(obj) {
+  return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined && v !== null));
+}
 
 function Badge({ children, color = "gray" }) {
   const colors = {
@@ -70,7 +64,7 @@ function Modal({ open, onClose, title, children }) {
   if (!open) return null;
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={onClose}>
-      <div style={{ background: "#fff", borderRadius: 14, padding: "28px 32px", minWidth: 380, maxWidth: 520, width: "90%", boxShadow: "0 8px 40px rgba(0,0,0,0.18)" }} onClick={e => e.stopPropagation()}>
+      <div style={{ background: "#fff", borderRadius: 14, padding: "28px 32px", minWidth: 380, maxWidth: 520, width: "90%", boxShadow: "0 8px 40px rgba(0,0,0,0.18)", maxHeight: "90vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
           <span style={{ fontWeight: 700, fontSize: 17 }}>{title}</span>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "#8c8c8c" }}>✕</button>
@@ -85,15 +79,13 @@ const inputStyle = {
   border: "1px solid #d9d9d9", borderRadius: 8, padding: "8px 12px", fontSize: 14, width: "100%", outline: "none", boxSizing: "border-box",
   fontFamily: "inherit", transition: "border 0.2s",
 };
-
-const btnPrimary = {
-  background: "#1677ff", color: "#fff", border: "none", borderRadius: 8, padding: "9px 18px",
-  fontSize: 14, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6,
-};
+const btnPrimary = { background: "#1677ff", color: "#fff", border: "none", borderRadius: 8, padding: "9px 18px", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 };
 const btnGreen = { ...btnPrimary, background: "#52c41a" };
 const btnOrange = { ...btnPrimary, background: "#fa8c16" };
 const btnRed = { ...btnPrimary, background: "#ff4d4f" };
 const btnGray = { ...btnPrimary, background: "#fff", color: "#595959", border: "1px solid #d9d9d9" };
+const labelStyle = { fontSize: 13, color: "#595959", marginBottom: 4, display: "block" };
+const sectionCard = { background: "#fff", borderRadius: 14, border: "1px solid #f0f0f0", padding: "22px 24px", marginBottom: 20, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" };
 
 export default function App() {
   const [stock, setStock] = useState([]);
@@ -109,31 +101,32 @@ export default function App() {
   const [autoConfirm, setAutoConfirm] = useState(true);
   const [searchOrder, setSearchOrder] = useState("");
   const [showCompleted, setShowCompleted] = useState(false);
-  const [tab, setTab] = useState("main");
-  const [stockSearch, setStockSearch] = useState("");
 
   const [addStockForm, setAddStockForm] = useState({ barcode: "", product: "", stock: "", location: "" });
   const [addOrderForm, setAddOrderForm] = useState({ pickNo: "", customer: "", barcode: "", product: "", location: "", required: 1 });
   const [editStockItem, setEditStockItem] = useState(null);
   const [editOrderItem, setEditOrderItem] = useState(null);
   const [confirmClear, setConfirmClear] = useState(false);
-  const [alert, setAlert] = useState(null);
+  const [alertMsg, setAlertMsg] = useState(null);
+  const [xlsxPreview, setXlsxPreview] = useState(null);
+  const [stockSearch, setStockSearch] = useState("");
+  const [pendingPickData, setPendingPickData] = useState(null);
 
   const barcodeRef = useRef();
   const pickNoRef = useRef();
 
-  // Load from Firebase on mount
+  // ─── Firebase ────────────────────────────────────────────────────────────────
   useEffect(() => {
     const stockRef = dbRef(db, "stock");
     const ordersRef = dbRef(db, "orders");
     let stockLoaded = false, ordersLoaded = false;
     const checkReady = () => { if (stockLoaded && ordersLoaded) setDbReady(true); };
-    const unsubStock = onValue(stockRef, snap => {
+    const unsubStock = onValue(stockRef, (snap) => {
       const val = snap.val();
       setStock(val ? Object.values(val) : []);
       stockLoaded = true; checkReady();
     });
-    const unsubOrders = onValue(ordersRef, snap => {
+    const unsubOrders = onValue(ordersRef, (snap) => {
       const val = snap.val();
       setOrders(val ? Object.values(val) : []);
       ordersLoaded = true; checkReady();
@@ -141,117 +134,171 @@ export default function App() {
     return () => { unsubStock(); unsubOrders(); };
   }, []);
 
-  // Save stock to Firebase
-  const saveStock = useCallback((newStock) => {
-    const obj = {};
-    newStock.forEach((s, i) => { obj[s.barcode.replace(/[.#$/[\]]/g, "_")] = s; });
-    set(dbRef(db, "stock"), obj);
+  const updateStock = useCallback((updater) => {
+    setStock((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      const obj = {};
+      next.forEach((s) => {
+        const key = String(s.barcode).replace(/[^a-zA-Z0-9_-]/g, "_");
+        obj[key] = cleanObj(s);
+      });
+      set(dbRef(db, "stock"), next.length ? obj : null);
+      return next;
+    });
   }, []);
 
-  // Save orders to Firebase
-  const saveOrders = useCallback((newOrders) => {
-    const obj = {};
-    newOrders.forEach(o => { obj[o.id] = o; });
-    set(dbRef(db, "orders"), obj);
+  // ✅ FIX: cleanObj กรอง undefined ออกก่อนส่ง Firebase ป้องกัน crash
+  const updateOrders = useCallback((updater) => {
+    setOrders((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      const obj = {};
+      next.forEach((o) => { obj[o.id] = cleanObj(o); });
+      set(dbRef(db, "orders"), next.length ? obj : null);
+      return next;
+    });
   }, []);
 
   const showAlert = useCallback((msg, type = "success") => {
-    setAlert({ msg, type });
-    setTimeout(() => setAlert(null), 2800);
+    setAlertMsg({ msg, type });
+    setTimeout(() => setAlertMsg(null), 2800);
   }, []);
 
-  const pendingOrders = orders.filter(o => o.status !== "COMPLETE");
-  const completedOrders = orders.filter(o => o.status === "COMPLETE");
+  // ─── Derived ─────────────────────────────────────────────────────────────────
+  const pendingOrders = orders.filter((o) => o.status !== "COMPLETE");
+  const completedOrders = orders.filter((o) => o.status === "COMPLETE");
   const displayOrders = showCompleted ? completedOrders : pendingOrders;
 
-  const filteredOrders = displayOrders.filter(o => {
-    const q = searchOrder.toLowerCase();
-    return !q || o.pickNo?.toLowerCase().includes(q) || o.customer?.toLowerCase().includes(q) ||
-      o.product?.toLowerCase().includes(q) || o.barcode?.toLowerCase().includes(q);
-  });
+  const filteredOrders = displayOrders
+    .filter((o) => {
+      const q = searchOrder.toLowerCase();
+      return !q || o.pickNo?.toLowerCase().includes(q) || o.customer?.toLowerCase().includes(q) ||
+        o.product?.toLowerCase().includes(q) || o.barcode?.toLowerCase().includes(q);
+    })
+    .sort((a, b) => {
+      if (showCompleted) {
+        return new Date(b.completedAtRaw || 0) - new Date(a.completedAtRaw || 0);
+      }
+      return new Date(b.createdAtRaw || 0) - new Date(a.createdAtRaw || 0);
+    });
 
-  const filteredStock = stock.filter(s => {
+  const filteredStock = stock.filter((s) => {
     const q = stockSearch.toLowerCase();
     return !q || s.barcode.includes(q) || s.product.toLowerCase().includes(q) || s.location.toLowerCase().includes(q);
   });
 
   function getOrderStatus(o) {
     if (o.status === "COMPLETE") return "complete";
-    const created = new Date(o.createdAtRaw);
-    if ((Date.now() - created) > 3 * 60 * 60 * 1000) return "over3h";
+    if ((Date.now() - new Date(o.createdAtRaw)) > 3 * 60 * 60 * 1000) return "over3h";
     return "pending";
   }
 
-  function confirmPick() {
-    if (!barcode.trim()) { setScanStatus("❌ กรุณากรอก Barcode"); setScanStatusColor("#ff4d4f"); return; }
-    const stockItem = stock.find(s => s.barcode === barcode.trim());
-    if (!stockItem) { setScanStatus("❌ ไม่พบสินค้าในระบบ"); setScanStatusColor("#ff4d4f"); return; }
-
-    let matchedOrder = null;
-    if (pickNo.trim()) {
-      matchedOrder = orders.find(o => o.pickNo === pickNo.trim() && o.barcode === barcode.trim() && o.status !== "COMPLETE");
-    } else {
-      matchedOrder = orders.find(o => o.barcode === barcode.trim() && o.status !== "COMPLETE");
-    }
-
-    const pickQty = Number(qty) || 1;
-    if (stockItem.stock < pickQty) { setScanStatus("❌ สต็อกไม่เพียงพอ"); setScanStatusColor("#ff4d4f"); return; }
-
-    updateStock(prev => prev.map(s => s.barcode === barcode.trim() ? { ...s, stock: s.stock - pickQty } : s));
-
+  // ─── Pick Logic ───────────────────────────────────────────────────────────────
+  function executePick(pickQty, stockItem, matchedOrder) {
+    updateStock((prev) =>
+      prev.map((s) => s.barcode === stockItem.barcode ? { ...s, stock: s.stock - pickQty } : s)
+    );
     if (matchedOrder) {
-      updateOrders(prev => prev.map(o => o.id === matchedOrder.id
-        ? { ...o, picked: (o.picked || 0) + pickQty, status: (o.picked || 0) + pickQty >= o.required ? "COMPLETE" : o.status, completedAt: (o.picked || 0) + pickQty >= o.required ? now() : o.completedAt, completedAtRaw: (o.picked || 0) + pickQty >= o.required ? new Date().toISOString() : o.completedAtRaw }
-        : o));
+      const newPicked = (matchedOrder.picked || 0) + pickQty;
+      const isComplete = newPicked >= matchedOrder.required;
+      const completedAt = isComplete ? now() : undefined;
+      const completedAtRaw = isComplete ? new Date().toISOString() : undefined;
+      updateOrders((prev) =>
+        prev.map((o) =>
+          o.id === matchedOrder.id
+            ? cleanObj({ ...o, picked: newPicked, status: isComplete ? "COMPLETE" : o.status, completedAt, completedAtRaw })
+            : o
+        )
+      );
       setScanStatus(`✅ หยิบสำเร็จ: ${stockItem.product} x${pickQty}`);
     } else {
       setScanStatus(`✅ หยิบสำเร็จ: ${stockItem.product} x${pickQty} (ไม่มี Order)`);
     }
     setScanStatusColor("#52c41a");
-
-    if (location.trim()) setLocation("");
     setBarcode("");
+    setLocation("");
+    setQty(1);
+    setPendingPickData(null);
     setTimeout(() => { setScanStatus("พร้อมสแกน"); setScanStatusColor("#52c41a"); barcodeRef.current?.focus(); }, 1500);
+  }
+
+  function confirmPick(forceConfirm = false) {
+    if (!barcode.trim()) {
+      setScanStatus("❌ กรุณากรอก Barcode");
+      setScanStatusColor("#ff4d4f");
+      return;
+    }
+    const pickQty = parseInt(String(qty), 10);
+    if (isNaN(pickQty) || pickQty <= 0) {
+      setScanStatus("❌ กรุณาระบุจำนวน (Qty) ที่ถูกต้อง");
+      setScanStatusColor("#ff4d4f");
+      return;
+    }
+    const stockItem = stock.find((s) => s.barcode === barcode.trim());
+    if (!stockItem) {
+      setScanStatus("❌ ไม่พบสินค้าในระบบ");
+      setScanStatusColor("#ff4d4f");
+      return;
+    }
+    if (stockItem.stock < pickQty) {
+      setScanStatus(`❌ สต็อกไม่เพียงพอ (มี ${stockItem.stock} ชิ้น)`);
+      setScanStatusColor("#ff4d4f");
+      return;
+    }
+    let matchedOrder = null;
+    if (pickNo.trim()) {
+      matchedOrder = orders.find((o) => o.pickNo === pickNo.trim() && o.barcode === barcode.trim() && o.status !== "COMPLETE");
+    } else {
+      matchedOrder = orders.find((o) => o.barcode === barcode.trim() && o.status !== "COMPLETE");
+    }
+    if (matchedOrder && !forceConfirm) {
+      const remaining = matchedOrder.required - (matchedOrder.picked || 0);
+      if (pickQty !== remaining) {
+        setPendingPickData({ pickQty, stockItem, matchedOrder, remaining });
+        setScanStatus(`⚠️ Qty ไม่ตรง — ต้องหยิบอีก ${remaining} ชิ้น แต่กรอก ${pickQty}`);
+        setScanStatusColor("#fa8c16");
+        return;
+      }
+    }
+    executePick(pickQty, stockItem, matchedOrder);
   }
 
   function handleBarcodeKeyDown(e) {
     if (e.key === "Enter") {
-      const found = stock.find(s => s.barcode === barcode.trim());
+      const found = stock.find((s) => s.barcode === barcode.trim());
       if (found && !location) setLocation(found.location);
-      if (autoConfirm) { setTimeout(confirmPick, 50); }
+      if (autoConfirm) setTimeout(() => confirmPick(false), 50);
     }
   }
 
+  // ─── Export ───────────────────────────────────────────────────────────────────
   function exportExcel() {
     const rows = [["Pick No", "Customer", "Barcode", "Product", "Location", "Required", "Picked", "Status", "Created At", "Completed At", "ใช้เวลา"]];
-    orders.forEach(o => {
+    orders.forEach((o) => {
       let duration = "";
       if (o.completedAtRaw && o.createdAtRaw) {
         const secs = Math.round((new Date(o.completedAtRaw) - new Date(o.createdAtRaw)) / 1000);
         if (secs < 60) duration = secs + " วินาที";
-        else if (secs < 3600) duration = Math.round(secs/60) + " นาที";
-        else { const h = Math.floor(secs/3600), m = Math.round((secs%3600)/60); duration = h + "ชม. " + m + "น."; }
+        else if (secs < 3600) duration = Math.round(secs / 60) + " นาที";
+        else { const h = Math.floor(secs / 3600), m = Math.round((secs % 3600) / 60); duration = h + "ชม. " + m + "น."; }
       }
       rows.push([o.pickNo, o.customer, o.barcode, o.product, o.location, o.required, o.picked || 0, o.status, o.createdAt, o.completedAt || "", duration]);
     });
-    const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
+    const csv = rows.map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
     const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = "pick_orders.csv"; a.click();
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "pick_orders.csv"; a.click();
   }
 
+  // ─── Backup / Restore ─────────────────────────────────────────────────────────
   function backupData() {
-    const data = { stock, orders, backupAt: new Date().toISOString() };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = `warehouse_backup_${Date.now()}.json`; a.click();
+    const blob = new Blob([JSON.stringify({ stock, orders, backupAt: new Date().toISOString() }, null, 2)], { type: "application/json" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `warehouse_backup_${Date.now()}.json`; a.click();
     showAlert("Backup สำเร็จ");
   }
 
   function restoreData(e) {
     const file = e.target.files[0]; if (!file) return;
     const reader = new FileReader();
-    reader.onload = ev => {
+    reader.onload = (ev) => {
       try {
         const data = JSON.parse(ev.target.result);
         if (data.stock) updateStock(data.stock);
@@ -263,15 +310,16 @@ export default function App() {
     e.target.value = "";
   }
 
+  // ─── Stock / Order CRUD ───────────────────────────────────────────────────────
   function handleAddStock() {
     const { barcode: bc, product, stock: st, location: loc } = addStockForm;
     if (!bc || !product || !st || !loc) { showAlert("กรุณากรอกข้อมูลให้ครบ", "error"); return; }
-    const existing = stock.find(s => s.barcode === bc);
+    const existing = stock.find((s) => s.barcode === bc);
     if (existing) {
-      updateStock(prev => prev.map(s => s.barcode === bc ? { ...s, stock: s.stock + Number(st), location: loc } : s));
+      updateStock((prev) => prev.map((s) => s.barcode === bc ? { ...s, stock: s.stock + Number(st), location: loc } : s));
       showAlert("อัพเดทสต็อกสำเร็จ");
     } else {
-      updateStock(prev => [...prev, { barcode: bc, product, stock: Number(st), location: loc }]);
+      updateStock((prev) => [...prev, { barcode: bc, product, stock: Number(st), location: loc }]);
       showAlert("เพิ่มสินค้าสำเร็จ");
     }
     setAddStockForm({ barcode: "", product: "", stock: "", location: "" });
@@ -281,34 +329,40 @@ export default function App() {
     const { customer, barcode: bc, product, location: loc, required } = addOrderForm;
     if (!bc || !product) { showAlert("กรุณากรอก Barcode และชื่อสินค้า", "error"); return; }
     const id = generateId();
-    const newOrder = {
+    const newOrder = cleanObj({
       id, pickNo: addOrderForm.pickNo || id, customer, barcode: bc, product,
       location: loc, required: Number(required) || 1, picked: 0,
       status: "PENDING", createdAt: now(), createdAtRaw: new Date().toISOString(),
-    };
-    updateOrders(prev => [...prev, newOrder]);
+    });
+    updateOrders((prev) => [...prev, newOrder]);
     setAddOrderForm({ pickNo: "", customer: "", barcode: "", product: "", location: "", required: 1 });
     showAlert("เพิ่ม Order สำเร็จ");
   }
 
   function handleEditStock() {
-    updateStock(prev => prev.map(s => s.barcode === editStockItem.barcode ? editStockItem : s));
-    setEditStockItem(null); showAlert("แก้ไขสำเร็จ");
+    updateStock((prev) => prev.map((s) => {
+      // ✅ FIX: match ด้วย barcode เดิม (originalBarcode) กรณีที่ user แก้ barcode ด้วย
+      const key = editStockItem._originalBarcode || editStockItem.barcode;
+      if (s.barcode === key) {
+        const { _originalBarcode, ...rest } = editStockItem;
+        return rest;
+      }
+      return s;
+    }));
+    setEditStockItem(null);
+    showAlert("แก้ไขสำเร็จ");
   }
 
   function handleEditOrder() {
-    updateOrders(prev => prev.map(o => o.id === editOrderItem.id ? editOrderItem : o));
+    updateOrders((prev) => prev.map((o) => o.id === editOrderItem.id ? cleanObj(editOrderItem) : o));
     setEditOrderItem(null); showAlert("แก้ไขสำเร็จ");
   }
 
-  // ---- Excel Upload helpers ----
-  const [xlsxPreview, setXlsxPreview] = useState(null); // { type: 'stock'|'order', rows: [], errors: [] }
-
+  // ─── Excel Import ─────────────────────────────────────────────────────────────
   function downloadStockTemplate() {
     const ws = XLSX.utils.aoa_to_sheet([
       ["barcode", "product", "stock", "location"],
       ["8851234567890", "สินค้า A", 100, "A01-01"],
-      ["8851234567891", "สินค้า B", 50, "A01-02"],
     ]);
     ws["!cols"] = [{ wch: 20 }, { wch: 20 }, { wch: 10 }, { wch: 14 }];
     const wb = XLSX.utils.book_new();
@@ -320,7 +374,6 @@ export default function App() {
     const ws = XLSX.utils.aoa_to_sheet([
       ["pickNo", "customer", "barcode", "product", "location", "required"],
       ["PO001", "ลูกค้า A", "8851234567890", "สินค้า A", "A01-01", 5],
-      ["PO002", "ลูกค้า B", "8851234567891", "สินค้า B", "A01-02", 3],
     ]);
     ws["!cols"] = [{ wch: 14 }, { wch: 16 }, { wch: 20 }, { wch: 20 }, { wch: 14 }, { wch: 12 }];
     const wb = XLSX.utils.book_new();
@@ -328,10 +381,9 @@ export default function App() {
     XLSX.writeFile(wb, "order_template.xlsx");
   }
 
-  function handleStockXlsx(e) {
-    const file = e.target.files[0]; if (!file) return;
+  function parseStockXlsx(file) {
     const reader = new FileReader();
-    reader.onload = ev => {
+    reader.onload = (ev) => {
       try {
         const wb = XLSX.read(ev.target.result, { type: "array" });
         const ws = wb.Sheets[wb.SheetNames[0]];
@@ -347,18 +399,16 @@ export default function App() {
           if (!row.barcode) errors.push(`แถว ${i + 2}: ไม่มี Barcode`);
           if (!row.product) errors.push(`แถว ${i + 2}: ไม่มีชื่อสินค้า`);
           return row;
-        }).filter(r => r.barcode);
+        }).filter((r) => r.barcode);
         setXlsxPreview({ type: "stock", rows, errors });
       } catch { showAlert("ไม่สามารถอ่านไฟล์ได้", "error"); }
     };
     reader.readAsArrayBuffer(file);
-    e.target.value = "";
   }
 
-  function handleOrderXlsx(e) {
-    const file = e.target.files[0]; if (!file) return;
+  function parseOrderXlsx(file) {
     const reader = new FileReader();
-    reader.onload = ev => {
+    reader.onload = (ev) => {
       try {
         const wb = XLSX.read(ev.target.result, { type: "array" });
         const ws = wb.Sheets[wb.SheetNames[0]];
@@ -376,21 +426,23 @@ export default function App() {
           if (!row.barcode) errors.push(`แถว ${i + 2}: ไม่มี Barcode`);
           if (!row.product) errors.push(`แถว ${i + 2}: ไม่มีชื่อสินค้า`);
           return row;
-        }).filter(r => r.barcode);
+        }).filter((r) => r.barcode);
         setXlsxPreview({ type: "order", rows, errors });
       } catch { showAlert("ไม่สามารถอ่านไฟล์ได้", "error"); }
     };
     reader.readAsArrayBuffer(file);
-    e.target.value = "";
   }
+
+  function handleStockXlsx(e) { const f = e.target.files[0]; if (f) parseStockXlsx(f); e.target.value = ""; }
+  function handleOrderXlsx(e) { const f = e.target.files[0]; if (f) parseOrderXlsx(f); e.target.value = ""; }
 
   function confirmXlsxImport() {
     if (!xlsxPreview) return;
     if (xlsxPreview.type === "stock") {
-      updateStock(prev => {
+      updateStock((prev) => {
         const updated = [...prev];
-        xlsxPreview.rows.forEach(r => {
-          const idx = updated.findIndex(s => s.barcode === r.barcode);
+        xlsxPreview.rows.forEach((r) => {
+          const idx = updated.findIndex((s) => s.barcode === r.barcode);
           if (idx >= 0) updated[idx] = { ...updated[idx], stock: updated[idx].stock + r.stock, location: r.location || updated[idx].location, product: r.product || updated[idx].product };
           else updated.push(r);
         });
@@ -398,39 +450,17 @@ export default function App() {
       });
       showAlert(`นำเข้าสต็อกสำเร็จ ${xlsxPreview.rows.length} รายการ`);
     } else {
-      const newOrders = xlsxPreview.rows.map(r => {
+      const newOrders = xlsxPreview.rows.map((r) => {
         const id = generateId();
-        return { id, pickNo: r.pickNo || id, customer: r.customer, barcode: r.barcode, product: r.product, location: r.location, required: r.required, picked: 0, status: "PENDING", createdAt: now(), createdAtRaw: new Date().toISOString() };
+        return cleanObj({ id, pickNo: r.pickNo || id, customer: r.customer, barcode: r.barcode, product: r.product, location: r.location, required: r.required, picked: 0, status: "PENDING", createdAt: now(), createdAtRaw: new Date().toISOString() });
       });
-      updateOrders(prev => [...prev, ...newOrders]);
+      updateOrders((prev) => [...prev, ...newOrders]);
       showAlert(`นำเข้า Order สำเร็จ ${newOrders.length} รายการ`);
     }
     setXlsxPreview(null);
   }
 
-  const updateStock = useCallback((updater) => {
-    setStock(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      const obj = {};
-      next.forEach(s => { obj[s.barcode.replace(/[^a-zA-Z0-9_-]/g, "_")] = s; });
-      set(dbRef(db, "stock"), next.length ? obj : null);
-      return next;
-    });
-  }, []);
-
-  const updateOrders = useCallback((updater) => {
-    setOrders(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      const obj = {};
-      next.forEach(o => { obj[o.id] = o; });
-      set(dbRef(db, "orders"), next.length ? obj : null);
-      return next;
-    });
-  }, []);
-
-  const sectionCard = { background: "#fff", borderRadius: 14, border: "1px solid #f0f0f0", padding: "22px 24px", marginBottom: 20, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" };
-  const labelStyle = { fontSize: 13, color: "#595959", marginBottom: 4, display: "block" };
-
+  // ─── Loading ──────────────────────────────────────────────────────────────────
   if (!dbReady) return (
     <div style={{ background: "#f7f8fa", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16, fontFamily: "'Noto Sans Thai', sans-serif" }}>
       <div style={{ fontSize: 40 }}>🔥</div>
@@ -441,15 +471,17 @@ export default function App() {
 
   return (
     <div style={{ background: "#f7f8fa", minHeight: "100vh", fontFamily: "'Noto Sans Thai', sans-serif", color: "#262626" }}>
-      {alert && (
-        <div style={{ position: "fixed", top: 20, right: 20, zIndex: 2000, background: alert.type === "error" ? "#ff4d4f" : "#52c41a", color: "#fff", borderRadius: 10, padding: "12px 22px", fontWeight: 600, fontSize: 14, boxShadow: "0 4px 16px rgba(0,0,0,0.18)", animation: "fadein 0.3s" }}>
-          {alert.type === "error" ? "❌ " : "✅ "}{alert.msg}
+
+      {/* Alert Toast */}
+      {alertMsg && (
+        <div style={{ position: "fixed", top: 20, right: 20, zIndex: 2000, background: alertMsg.type === "error" ? "#ff4d4f" : "#52c41a", color: "#fff", borderRadius: 10, padding: "12px 22px", fontWeight: 600, fontSize: 14, boxShadow: "0 4px 16px rgba(0,0,0,0.18)", animation: "fadein 0.3s" }}>
+          {alertMsg.type === "error" ? "❌ " : "✅ "}{alertMsg.msg}
         </div>
       )}
 
       {/* Header */}
       <div style={{ background: "#fff", borderBottom: "1px solid #f0f0f0", padding: "0 32px", display: "flex", alignItems: "center", gap: 16, position: "sticky", top: 0, zIndex: 100, height: 58 }}>
-        <span style={{ fontSize: 22, marginRight: 4 }}>📦</span>
+        <span style={{ fontSize: 22 }}>📦</span>
         <span style={{ fontWeight: 800, fontSize: 18, letterSpacing: -0.5 }}>Warehouse Picking System</span>
         <div style={{ flex: 1 }} />
         <input type="file" accept=".json" id="restore-file" style={{ display: "none" }} onChange={restoreData} />
@@ -459,6 +491,7 @@ export default function App() {
       </div>
 
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 20px" }}>
+
         {/* Stat Cards */}
         <div style={{ display: "flex", gap: 16, marginBottom: 20, flexWrap: "wrap" }}>
           <StatCard icon="📋" value={orders.length} label="รายการทั้งหมด" color="#1677ff" />
@@ -471,7 +504,7 @@ export default function App() {
         <div style={sectionCard}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
             <span style={{ fontWeight: 700, fontSize: 16 }}>📱 สแกนหยิบสินค้า (Mobile Scanner)</span>
-            <button onClick={() => setAutoConfirm(v => !v)} style={{ ...btnPrimary, background: autoConfirm ? "#52c41a" : "#8c8c8c", fontSize: 12, padding: "4px 12px" }}>
+            <button onClick={() => setAutoConfirm((v) => !v)} style={{ ...btnPrimary, background: autoConfirm ? "#52c41a" : "#8c8c8c", fontSize: 12, padding: "4px 12px" }}>
               ⚡ Auto Confirm {autoConfirm ? "เปิดอยู่" : "ปิดอยู่"}
             </button>
           </div>
@@ -481,25 +514,65 @@ export default function App() {
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
             <div style={{ flex: "1 1 180px" }}>
               <label style={labelStyle}>Pick No</label>
-              <input ref={pickNoRef} style={inputStyle} value={pickNo} onChange={e => setPickNo(e.target.value)} placeholder="สแกนหรือกรอก Pick No" onKeyDown={e => e.key === "Enter" && barcodeRef.current?.focus()} />
+              <input ref={pickNoRef} style={inputStyle} value={pickNo} onChange={(e) => setPickNo(e.target.value)}
+                placeholder="สแกนหรือกรอก Pick No"
+                onKeyDown={(e) => e.key === "Enter" && barcodeRef.current?.focus()} />
             </div>
             <div style={{ flex: "1 1 220px" }}>
               <label style={labelStyle}>Barcode <span style={{ color: "#8c8c8c", fontWeight: 400 }}>(กด Enter เพื่อบันทึก)</span></label>
-              <input ref={barcodeRef} style={{ ...inputStyle, border: "2px solid #40a9ff", background: "#f0f9ff" }} value={barcode} onChange={e => setBarcode(e.target.value)} placeholder="สแกนหรือกรอก Barcode ที่นี่" onKeyDown={handleBarcodeKeyDown} />
+              <input ref={barcodeRef}
+                style={{ ...inputStyle, border: "2px solid #40a9ff", background: "#f0f9ff" }}
+                value={barcode} onChange={(e) => setBarcode(e.target.value)}
+                placeholder="สแกนหรือกรอก Barcode ที่นี่"
+                onKeyDown={handleBarcodeKeyDown} />
             </div>
             <div style={{ flex: "1 1 160px" }}>
               <label style={labelStyle}>Location <span style={{ color: "#8c8c8c", fontWeight: 400 }}>(ระบุเพื่อแยก barcode ซ้ำ)</span></label>
-              <input style={inputStyle} value={location} onChange={e => setLocation(e.target.value)} placeholder="เช่น Q14-028-40" />
+              <input style={inputStyle} value={location} onChange={(e) => setLocation(e.target.value)} placeholder="เช่น Q14-028-40" />
             </div>
-            <div style={{ flex: "0 0 80px" }}>
+            <div style={{ flex: "0 0 100px" }}>
               <label style={labelStyle}>Qty</label>
-              <input style={{ ...inputStyle, textAlign: "center" }} type="number" min="1" value={qty} onChange={e => setQty(e.target.value)} />
+              <input
+                style={{ ...inputStyle, textAlign: "center" }}
+                type="number" min="1"
+                value={qty}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  setQty(isNaN(v) || v < 1 ? 1 : v);
+                }}
+              />
             </div>
-            <button style={{ ...btnGreen, flexShrink: 0 }} onClick={confirmPick}>✅ ยืนยันการหยิบสินค้า</button>
+            <button style={{ ...btnGreen, flexShrink: 0 }} onClick={() => confirmPick(false)}>
+              ✅ ยืนยันการหยิบสินค้า
+            </button>
           </div>
-          <div style={{ marginTop: 10, fontSize: 14 }}>
+          <div style={{ marginTop: 12, fontSize: 14 }}>
             สถานะ: <span style={{ color: scanStatusColor, fontWeight: 600 }}>{scanStatus}</span>
           </div>
+
+          {/* ✅ Warning banner เมื่อ qty ไม่ตรง */}
+          {pendingPickData && (
+            <div style={{ marginTop: 12, background: "#fffbe6", border: "1px solid #ffd666", borderRadius: 10, padding: "14px 18px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 20 }}>⚠️</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, color: "#614700", marginBottom: 4 }}>จำนวนไม่ตรงกับ Order</div>
+                <div style={{ fontSize: 13, color: "#614700" }}>
+                  Order <strong>{pendingPickData.matchedOrder.pickNo}</strong> ต้องหยิบอีก <strong style={{ color: "#ff4d4f" }}>{pendingPickData.remaining}</strong> ชิ้น
+                  แต่คุณกรอก <strong style={{ color: "#1677ff" }}>{pendingPickData.pickQty}</strong> ชิ้น
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button style={{ ...btnGreen, fontSize: 13, padding: "7px 14px" }}
+                  onClick={() => executePick(pendingPickData.pickQty, pendingPickData.stockItem, pendingPickData.matchedOrder)}>
+                  ✅ ยืนยัน {pendingPickData.pickQty} ชิ้น
+                </button>
+                <button style={{ ...btnGray, fontSize: 13, padding: "7px 14px" }}
+                  onClick={() => { setPendingPickData(null); setScanStatus("พร้อมสแกน"); setScanStatusColor("#52c41a"); }}>
+                  ยกเลิก
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Pick Order Table */}
@@ -508,20 +581,22 @@ export default function App() {
             <span style={{ fontWeight: 700, fontSize: 16 }}>📋 รายการ Pick Order</span>
             <Badge color="pending">⏳ PENDING {pendingOrders.length} รายการ</Badge>
             <div style={{ flex: 1, minWidth: 220 }}>
-              <input style={{ ...inputStyle, maxWidth: 320 }} value={searchOrder} onChange={e => setSearchOrder(e.target.value)} placeholder="🔍 ค้นหา Pick No, ลูกค้า, สินค้า, Barcode" />
+              <input style={{ ...inputStyle, maxWidth: 320 }} value={searchOrder} onChange={(e) => setSearchOrder(e.target.value)}
+                placeholder="🔍 ค้นหา Pick No, ลูกค้า, สินค้า, Barcode" />
             </div>
-            <button style={{ ...btnGreen, position: "relative" }} onClick={() => setShowCompleted(v => !v)}>
+            <button style={btnGreen} onClick={() => setShowCompleted((v) => !v)}>
               ✅ {showCompleted ? "ดูรายการค้าง" : "ดูรายการเสร็จแล้ว"}
-              <span style={{ background: "#fff", color: "#52c41a", borderRadius: 99, padding: "1px 7px", fontSize: 12, marginLeft: 6 }}>{showCompleted ? pendingOrders.length : completedOrders.length}</span>
+              <span style={{ background: "#fff", color: "#52c41a", borderRadius: 99, padding: "1px 7px", fontSize: 12, marginLeft: 6 }}>
+                {showCompleted ? pendingOrders.length : completedOrders.length}
+              </span>
             </button>
             <button style={btnOrange} onClick={exportExcel}>⬇️ Export Excel</button>
           </div>
-
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: "#fafafa", borderBottom: "1px solid #f0f0f0" }}>
-                  {["Pick No", "Customer", "Barcode", "Product", "Location", "Required", "Picked", "Status", "Alert", "Created At", "Completed At", "ใช้เวลา", ""].map(h => (
+                  {["Pick No", "Customer", "Barcode", "Product", "Location", "Required", "Picked", "Status", "Alert", "Created At", "Completed At", "ใช้เวลา", ""].map((h) => (
                     <th key={h} style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600, color: "#595959", whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
@@ -531,10 +606,11 @@ export default function App() {
                   <tr><td colSpan={13} style={{ textAlign: "center", padding: 40, color: "#8c8c8c" }}>
                     <div style={{ fontSize: 32, marginBottom: 8 }}>🎉</div>
                     ไม่มีรายการค้างดำเนินการ<br />
-                    <span style={{ fontSize: 12 }}>รายการทั้งหมดเสร็จสิ้นแล้ว กดปุ่ม "ดูรายการเสร็จแล้ว" เพื่อดู</span>
+                    <span style={{ fontSize: 12 }}>กดปุ่ม "ดูรายการเสร็จแล้ว" เพื่อดูรายการที่เสร็จสิ้น</span>
                   </td></tr>
-                ) : filteredOrders.map(o => {
+                ) : filteredOrders.map((o) => {
                   const st = getOrderStatus(o);
+                  const picked = o.picked || 0;
                   return (
                     <tr key={o.id} style={{ borderBottom: "1px solid #f5f5f5" }}>
                       <td style={{ padding: "10px 12px", fontWeight: 600, color: "#1677ff" }}>{o.pickNo}</td>
@@ -543,46 +619,37 @@ export default function App() {
                       <td style={{ padding: "10px 12px" }}>{o.product}</td>
                       <td style={{ padding: "10px 12px" }}>{o.location || "-"}</td>
                       <td style={{ padding: "10px 12px", textAlign: "center" }}>{o.required}</td>
-                      <td style={{ padding: "10px 12px", textAlign: "center", color: (o.picked || 0) >= o.required ? "#52c41a" : "#fa8c16", fontWeight: 600 }}>{o.picked || 0}</td>
+                      <td style={{ padding: "10px 12px", textAlign: "center", color: picked >= o.required ? "#52c41a" : "#fa8c16", fontWeight: 600 }}>{picked}</td>
                       <td style={{ padding: "10px 12px" }}>
-                        <Badge color={st === "complete" ? "complete" : st === "over3h" ? "over3h" : "pending"}>
-                          {o.status}
-                        </Badge>
+                        <Badge color={st === "complete" ? "complete" : st === "over3h" ? "over3h" : "pending"}>{o.status}</Badge>
                       </td>
                       <td style={{ padding: "10px 12px" }}>{st === "over3h" ? <span style={{ color: "#ff4d4f", fontWeight: 600 }}>⚠️ เกิน 3ชม.</span> : "-"}</td>
-                      {/* Created At */}
                       <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>
-                        {o.createdAt ? (
-                          <div>
-                            <div style={{ fontSize: 12, color: "#262626", fontWeight: 500 }}>{o.createdAt.split(" ")[0]}</div>
-                            <div style={{ fontSize: 12, color: "#1677ff", fontWeight: 600 }}>{o.createdAt.split(" ")[1]}</div>
-                          </div>
-                        ) : "-"}
+                        {o.createdAt ? (<div>
+                          <div style={{ fontSize: 12, color: "#262626", fontWeight: 500 }}>{o.createdAt.split(" ")[0]}</div>
+                          <div style={{ fontSize: 12, color: "#1677ff", fontWeight: 600 }}>{o.createdAt.split(" ")[1]}</div>
+                        </div>) : "-"}
                       </td>
-                      {/* Completed At */}
                       <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>
-                        {o.completedAt ? (
-                          <div>
-                            <div style={{ fontSize: 12, color: "#262626", fontWeight: 500 }}>{o.completedAt.split(" ")[0]}</div>
-                            <div style={{ fontSize: 12, color: "#52c41a", fontWeight: 600 }}>{o.completedAt.split(" ")[1]}</div>
-                          </div>
-                        ) : <span style={{ color: "#d9d9d9", fontSize: 12 }}>-</span>}
+                        {o.completedAt ? (<div>
+                          <div style={{ fontSize: 12, color: "#262626", fontWeight: 500 }}>{o.completedAt.split(" ")[0]}</div>
+                          <div style={{ fontSize: 12, color: "#52c41a", fontWeight: 600 }}>{o.completedAt.split(" ")[1]}</div>
+                        </div>) : <span style={{ color: "#d9d9d9", fontSize: 12 }}>-</span>}
                       </td>
-                      {/* Duration */}
                       <td style={{ padding: "10px 12px", textAlign: "center" }}>
                         {o.completedAtRaw && o.createdAtRaw ? (() => {
-                          const mins = Math.round((new Date(o.completedAtRaw) - new Date(o.createdAtRaw)) / 60000);
                           const secs = Math.round((new Date(o.completedAtRaw) - new Date(o.createdAtRaw)) / 1000);
+                          const mins = Math.floor(secs / 60);
                           if (secs < 60) return <span style={{ color: "#722ed1", fontWeight: 700, fontSize: 13 }}>{secs} วิ</span>;
                           if (mins < 60) return <span style={{ color: "#52c41a", fontWeight: 700, fontSize: 13 }}>{mins} นาที</span>;
-                          const h = Math.floor(mins / 60), m = mins % 60;
-                          return <span style={{ color: "#fa8c16", fontWeight: 700, fontSize: 13 }}>{h}ชม. {m}น.</span>;
+                          return <span style={{ color: "#fa8c16", fontWeight: 700, fontSize: 13 }}>{Math.floor(mins / 60)}ชม. {mins % 60}น.</span>;
                         })() : <span style={{ color: "#d9d9d9", fontSize: 12 }}>-</span>}
                       </td>
                       <td style={{ padding: "10px 12px" }}>
                         <div style={{ display: "flex", gap: 6 }}>
                           <button onClick={() => setEditOrderItem({ ...o })} style={{ ...btnGray, padding: "4px 10px", fontSize: 12 }}>✏️</button>
-                          <button onClick={() => { updateOrders(prev => prev.filter(x => x.id !== o.id)); showAlert("ลบ Order แล้ว"); }} style={{ ...btnRed, padding: "4px 10px", fontSize: 12 }}>🗑️</button>
+                          <button onClick={() => { updateOrders((prev) => prev.filter((x) => x.id !== o.id)); showAlert("ลบ Order แล้ว"); }}
+                            style={{ ...btnRed, padding: "4px 10px", fontSize: 12 }}>🗑️</button>
                         </div>
                       </td>
                     </tr>
@@ -591,12 +658,10 @@ export default function App() {
               </tbody>
             </table>
           </div>
-          <div style={{ marginTop: 12, fontSize: 12, color: "#8c8c8c", display: "flex", gap: 20, flexWrap: "wrap" }}>
-            <span>แสดงเฉพาะรายการที่ยังไม่เสร็จ:</span>
+          <div style={{ marginTop: 12, fontSize: 12, color: "#8c8c8c", display: "flex", gap: 16, flexWrap: "wrap" }}>
             <Badge color="pending">PENDING = รอดำเนินการ</Badge>
-            <Badge color="over3h">OVER 3 HOURS = ค้างเกิน 3 ชั่วโมง</Badge>
-            <span style={{ color: "#595959" }}>NORMAL = ปกติ</span>
-            <span>✅ รายการ COMPLETE อยู่ในปุ่ม "ดูรายการเสร็จแล้ว"</span>
+            <Badge color="over3h">OVER 3H = ค้างเกิน 3 ชั่วโมง</Badge>
+            <Badge color="complete">COMPLETE = เสร็จสิ้น</Badge>
           </div>
         </div>
 
@@ -611,13 +676,11 @@ export default function App() {
                 <button style={{ ...btnGreen, fontSize: 12, padding: "5px 12px" }} onClick={() => document.getElementById("stock-xlsx").click()}>📤 Upload Excel</button>
               </div>
             </div>
-            {/* Drop zone hint */}
             <div
               style={{ border: "2px dashed #91d5ff", borderRadius: 8, padding: "10px 14px", marginBottom: 14, background: "#f0f9ff", fontSize: 12, color: "#0958d9", textAlign: "center", cursor: "pointer" }}
               onClick={() => document.getElementById("stock-xlsx").click()}
-              onDragOver={e => e.preventDefault()}
-              onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) { const inp = document.getElementById("stock-xlsx"); const dt = new DataTransfer(); dt.items.add(f); inp.files = dt.files; handleStockXlsx({ target: inp }); } }}
-            >
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) parseStockXlsx(f); }}>
               📂 คลิกหรือลากไฟล์ Excel / CSV มาวางที่นี่<br />
               <span style={{ color: "#8c8c8c" }}>รองรับคอลัมน์: barcode, product, stock, location</span>
             </div>
@@ -625,7 +688,8 @@ export default function App() {
               {[["barcode", "Barcode"], ["product", "ชื่อสินค้า"], ["stock", "จำนวน", "number"], ["location", "Location"]].map(([key, label, type]) => (
                 <div key={key}>
                   <label style={labelStyle}>{label}</label>
-                  <input style={inputStyle} type={type || "text"} value={addStockForm[key]} onChange={e => setAddStockForm(f => ({ ...f, [key]: e.target.value }))} placeholder={label} />
+                  <input style={inputStyle} type={type || "text"} value={addStockForm[key]}
+                    onChange={(e) => setAddStockForm((f) => ({ ...f, [key]: e.target.value }))} placeholder={label} />
                 </div>
               ))}
               <button style={{ ...btnPrimary, marginTop: 4, width: "100%", justifyContent: "center" }} onClick={handleAddStock}>➕ เพิ่มสต็อก</button>
@@ -641,68 +705,55 @@ export default function App() {
                 <button style={{ ...btnOrange, fontSize: 12, padding: "5px 12px" }} onClick={() => document.getElementById("order-xlsx").click()}>📤 Upload Excel</button>
               </div>
             </div>
-            {/* Drop zone hint */}
             <div
               style={{ border: "2px dashed #ffd591", borderRadius: 8, padding: "10px 14px", marginBottom: 14, background: "#fffbe6", fontSize: 12, color: "#874d00", textAlign: "center", cursor: "pointer" }}
               onClick={() => document.getElementById("order-xlsx").click()}
-              onDragOver={e => e.preventDefault()}
-              onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) { const inp = document.getElementById("order-xlsx"); const dt = new DataTransfer(); dt.items.add(f); inp.files = dt.files; handleOrderXlsx({ target: inp }); } }}
-            >
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) parseOrderXlsx(f); }}>
               📂 คลิกหรือลากไฟล์ Excel / CSV มาวางที่นี่<br />
               <span style={{ color: "#8c8c8c" }}>รองรับคอลัมน์: pickNo, customer, barcode, product, location, required</span>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {/* Pick No */}
               <div>
                 <label style={labelStyle}>Pick No (ไม่ต้องใส่ก็ได้)</label>
-                <input style={inputStyle} value={addOrderForm.pickNo} onChange={e => setAddOrderForm(f => ({ ...f, pickNo: e.target.value }))} placeholder="Pick No (ไม่ต้องใส่ก็ได้)" />
+                <input style={inputStyle} value={addOrderForm.pickNo} onChange={(e) => setAddOrderForm((f) => ({ ...f, pickNo: e.target.value }))} placeholder="Pick No" />
               </div>
-              {/* Customer */}
               <div>
                 <label style={labelStyle}>ชื่อลูกค้า</label>
-                <input style={inputStyle} value={addOrderForm.customer} onChange={e => setAddOrderForm(f => ({ ...f, customer: e.target.value }))} placeholder="ชื่อลูกค้า" />
+                <input style={inputStyle} value={addOrderForm.customer} onChange={(e) => setAddOrderForm((f) => ({ ...f, customer: e.target.value }))} placeholder="ชื่อลูกค้า" />
               </div>
-              {/* Barcode — triggers auto-fill */}
               <div>
                 <label style={labelStyle}>Barcode *</label>
                 <input
-                  style={{ ...inputStyle, border: addOrderForm.barcode && stock.find(s => s.barcode === addOrderForm.barcode.trim()) ? "2px solid #52c41a" : inputStyle.border }}
+                  style={{ ...inputStyle, border: addOrderForm.barcode && stock.find((s) => s.barcode === addOrderForm.barcode.trim()) ? "2px solid #52c41a" : inputStyle.border }}
                   value={addOrderForm.barcode}
-                  onChange={e => {
+                  onChange={(e) => {
                     const bc = e.target.value;
-                    const found = stock.find(s => s.barcode === bc.trim());
-                    setAddOrderForm(f => ({
-                      ...f,
-                      barcode: bc,
-                      product: found ? found.product : f.product,
-                      location: found ? found.location : f.location,
-                    }));
+                    const found = stock.find((s) => s.barcode === bc.trim());
+                    setAddOrderForm((f) => ({ ...f, barcode: bc, product: found ? found.product : f.product, location: found ? found.location : f.location }));
                   }}
-                  placeholder="Barcode *"
-                />
+                  placeholder="Barcode *" />
                 {addOrderForm.barcode && (() => {
-                  const found = stock.find(s => s.barcode === addOrderForm.barcode.trim());
+                  const found = stock.find((s) => s.barcode === addOrderForm.barcode.trim());
                   return found
                     ? <div style={{ marginTop: 4, fontSize: 12, color: "#52c41a", fontWeight: 600 }}>✅ พบสินค้า: {found.product} | Stock: {found.stock} | {found.location}</div>
                     : addOrderForm.barcode.length > 3
-                      ? <div style={{ marginTop: 4, fontSize: 12, color: "#fa8c16" }}>⚠️ ไม่พบ Barcode นี้ใน Stock — กรอกชื่อสินค้าด้านล่างเอง</div>
+                      ? <div style={{ marginTop: 4, fontSize: 12, color: "#fa8c16" }}>⚠️ ไม่พบ Barcode นี้ใน Stock</div>
                       : null;
                 })()}
               </div>
-              {/* Product — auto or manual */}
               <div>
                 <label style={labelStyle}>ชื่อสินค้า *</label>
-                <input style={inputStyle} value={addOrderForm.product} onChange={e => setAddOrderForm(f => ({ ...f, product: e.target.value }))} placeholder="ชื่อสินค้า *" />
+                <input style={inputStyle} value={addOrderForm.product} onChange={(e) => setAddOrderForm((f) => ({ ...f, product: e.target.value }))} placeholder="ชื่อสินค้า *" />
               </div>
-              {/* Location — auto or manual */}
               <div>
                 <label style={labelStyle}>Location</label>
-                <input style={inputStyle} value={addOrderForm.location} onChange={e => setAddOrderForm(f => ({ ...f, location: e.target.value }))} placeholder="Location" />
+                <input style={inputStyle} value={addOrderForm.location} onChange={(e) => setAddOrderForm((f) => ({ ...f, location: e.target.value }))} placeholder="Location" />
               </div>
-              {/* Required qty */}
               <div>
                 <label style={labelStyle}>จำนวนที่ต้องหยิบ</label>
-                <input style={inputStyle} type="number" value={addOrderForm.required} onChange={e => setAddOrderForm(f => ({ ...f, required: e.target.value }))} placeholder="จำนวนที่ต้องหยิบ" />
+                <input style={inputStyle} type="number" min="1" value={addOrderForm.required}
+                  onChange={(e) => setAddOrderForm((f) => ({ ...f, required: e.target.value }))} placeholder="จำนวน" />
               </div>
               <button style={{ ...btnOrange, marginTop: 4, width: "100%", justifyContent: "center" }} onClick={handleAddOrder}>➕ เพิ่ม Order</button>
             </div>
@@ -714,7 +765,7 @@ export default function App() {
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
             <span style={{ fontWeight: 700, fontSize: 16 }}>📦 Stock คงเหลือ</span>
             <div style={{ flex: 1 }}>
-              <input style={{ ...inputStyle, maxWidth: 280 }} value={stockSearch} onChange={e => setStockSearch(e.target.value)} placeholder="ค้นหา Stock..." />
+              <input style={{ ...inputStyle, maxWidth: 280 }} value={stockSearch} onChange={(e) => setStockSearch(e.target.value)} placeholder="ค้นหา Stock..." />
             </div>
             <button style={btnRed} onClick={() => { if (window.confirm("ลบ Stock ทั้งหมด?")) { updateStock([]); showAlert("ลบ Stock ทั้งหมดแล้ว"); } }}>🗑️ ลบทั้งหมด</button>
           </div>
@@ -722,13 +773,13 @@ export default function App() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
               <thead>
                 <tr style={{ background: "#fafafa", borderBottom: "1px solid #f0f0f0" }}>
-                  {["Barcode", "Product", "Stock", "Location", "แก้ไข"].map(h => (
+                  {["Barcode", "Product", "Stock", "Location", "แก้ไข"].map((h) => (
                     <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontWeight: 600, color: "#595959" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {filteredStock.map(s => (
+                {filteredStock.map((s) => (
                   <tr key={s.barcode} style={{ borderBottom: "1px solid #f5f5f5" }}>
                     <td style={{ padding: "10px 14px", fontFamily: "monospace" }}>{s.barcode}</td>
                     <td style={{ padding: "10px 14px" }}>{s.product}</td>
@@ -736,8 +787,8 @@ export default function App() {
                     <td style={{ padding: "10px 14px" }}>{s.location}</td>
                     <td style={{ padding: "10px 14px" }}>
                       <div style={{ display: "flex", gap: 8 }}>
-                        <button onClick={() => setEditStockItem({ ...s })} style={{ ...btnPrimary, padding: "5px 14px", fontSize: 13 }}>✏️ แก้ไข</button>
-                        <button onClick={() => { updateStock(prev => prev.filter(x => x.barcode !== s.barcode)); showAlert("ลบสินค้าแล้ว"); }} style={{ ...btnRed, padding: "5px 14px", fontSize: 13 }}>🗑️ ลบ</button>
+                        <button onClick={() => setEditStockItem({ ...s, _originalBarcode: s.barcode })} style={{ ...btnPrimary, padding: "5px 14px", fontSize: 13 }}>✏️ แก้ไข</button>
+                        <button onClick={() => { updateStock((prev) => prev.filter((x) => x.barcode !== s.barcode)); showAlert("ลบสินค้าแล้ว"); }} style={{ ...btnRed, padding: "5px 14px", fontSize: 13 }}>🗑️ ลบ</button>
                       </div>
                     </td>
                   </tr>
@@ -758,7 +809,8 @@ export default function App() {
             {[["barcode", "Barcode"], ["product", "ชื่อสินค้า"], ["stock", "จำนวน", "number"], ["location", "Location"]].map(([key, label, type]) => (
               <div key={key}>
                 <label style={labelStyle}>{label}</label>
-                <input style={inputStyle} type={type || "text"} value={editStockItem[key]} onChange={e => setEditStockItem(f => ({ ...f, [key]: type === "number" ? Number(e.target.value) : e.target.value }))} />
+                <input style={inputStyle} type={type || "text"} value={editStockItem[key]}
+                  onChange={(e) => setEditStockItem((f) => ({ ...f, [key]: type === "number" ? Number(e.target.value) : e.target.value }))} />
               </div>
             ))}
             <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
@@ -776,12 +828,13 @@ export default function App() {
             {[["pickNo", "Pick No"], ["customer", "ลูกค้า"], ["barcode", "Barcode"], ["product", "สินค้า"], ["location", "Location"], ["required", "จำนวนที่ต้องหยิบ", "number"], ["picked", "หยิบแล้ว", "number"]].map(([key, label, type]) => (
               <div key={key}>
                 <label style={labelStyle}>{label}</label>
-                <input style={inputStyle} type={type || "text"} value={editOrderItem[key] ?? ""} onChange={e => setEditOrderItem(f => ({ ...f, [key]: type === "number" ? Number(e.target.value) : e.target.value }))} />
+                <input style={inputStyle} type={type || "text"} value={editOrderItem[key] ?? ""}
+                  onChange={(e) => setEditOrderItem((f) => ({ ...f, [key]: type === "number" ? Number(e.target.value) : e.target.value }))} />
               </div>
             ))}
             <div>
               <label style={labelStyle}>Status</label>
-              <select style={inputStyle} value={editOrderItem.status} onChange={e => setEditOrderItem(f => ({ ...f, status: e.target.value }))}>
+              <select style={inputStyle} value={editOrderItem.status} onChange={(e) => setEditOrderItem((f) => ({ ...f, status: e.target.value }))}>
                 <option>PENDING</option>
                 <option>COMPLETE</option>
               </select>
@@ -812,19 +865,19 @@ export default function App() {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                 <thead>
                   <tr style={{ background: "#fafafa", position: "sticky", top: 0 }}>
-                    {xlsxPreview.type === "stock"
-                      ? ["Barcode", "Product", "Stock", "Location"].map(h => <th key={h} style={{ padding: "7px 10px", textAlign: "left", fontWeight: 600, color: "#595959" }}>{h}</th>)
-                      : ["Pick No", "Customer", "Barcode", "Product", "Location", "Required"].map(h => <th key={h} style={{ padding: "7px 10px", textAlign: "left", fontWeight: 600, color: "#595959" }}>{h}</th>)
-                    }
+                    {(xlsxPreview.type === "stock"
+                      ? ["Barcode", "Product", "Stock", "Location"]
+                      : ["Pick No", "Customer", "Barcode", "Product", "Location", "Required"]
+                    ).map((h) => <th key={h} style={{ padding: "7px 10px", textAlign: "left", fontWeight: 600, color: "#595959" }}>{h}</th>)}
                   </tr>
                 </thead>
                 <tbody>
                   {xlsxPreview.rows.slice(0, 50).map((r, i) => (
                     <tr key={i} style={{ borderBottom: "1px solid #f5f5f5" }}>
-                      {xlsxPreview.type === "stock"
-                        ? [r.barcode, r.product, r.stock, r.location].map((v, j) => <td key={j} style={{ padding: "6px 10px", fontFamily: j === 0 ? "monospace" : "inherit" }}>{v}</td>)
-                        : [r.pickNo, r.customer, r.barcode, r.product, r.location, r.required].map((v, j) => <td key={j} style={{ padding: "6px 10px", fontFamily: j === 2 ? "monospace" : "inherit" }}>{v}</td>)
-                      }
+                      {(xlsxPreview.type === "stock"
+                        ? [r.barcode, r.product, r.stock, r.location]
+                        : [r.pickNo, r.customer, r.barcode, r.product, r.location, r.required]
+                      ).map((v, j) => <td key={j} style={{ padding: "6px 10px" }}>{v}</td>)}
                     </tr>
                   ))}
                   {xlsxPreview.rows.length > 50 && (
@@ -840,12 +893,14 @@ export default function App() {
           </div>
         )}
       </Modal>
+
+      {/* Confirm Clear Modal */}
       <Modal open={confirmClear} onClose={() => setConfirmClear(false)} title="⚠️ ล้างข้อมูลวันนี้">
         <p style={{ color: "#595959", marginBottom: 20 }}>ต้องการล้างข้อมูล Orders วันนี้ทั้งหมดหรือไม่? (Stock จะไม่ถูกลบ)</p>
         <div style={{ display: "flex", gap: 10 }}>
           <button style={{ ...btnRed, flex: 1 }} onClick={() => {
             const today = new Date().toLocaleDateString("th-TH");
-            updateOrders(prev => prev.filter(o => new Date(o.createdAtRaw).toLocaleDateString("th-TH") !== today));
+            updateOrders((prev) => prev.filter((o) => new Date(o.createdAtRaw).toLocaleDateString("th-TH") !== today));
             setConfirmClear(false); showAlert("ล้างข้อมูลวันนี้แล้ว");
           }}>ยืนยันล้างข้อมูล</button>
           <button style={{ ...btnGray, flex: 1 }} onClick={() => setConfirmClear(false)}>ยกเลิก</button>
