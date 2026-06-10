@@ -30,12 +30,13 @@ function now() {
   } ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-// ✅ กรอง undefined ออกก่อนส่ง Firebase
 function cleanObj(obj) {
   return Object.fromEntries(
     Object.entries(obj).filter(([, v]) => v !== undefined && v !== null)
   );
 }
+
+// ─── UI Components ────────────────────────────────────────────────────────────
 
 function Badge({ children, color = "gray" }) {
   const colors = {
@@ -162,6 +163,8 @@ function Modal({ open, onClose, title, children }) {
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
 const inputStyle = {
   border: "1px solid #d9d9d9",
   borderRadius: 8,
@@ -173,24 +176,25 @@ const inputStyle = {
   fontFamily: "inherit",
   transition: "border 0.2s",
 };
-const btnPrimary = {
-  background: "#1677ff",
-  color: "#fff",
-  border: "none",
-  borderRadius: 8,
-  padding: "9px 18px",
-  fontSize: 14,
-  fontWeight: 600,
-  cursor: "pointer",
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 6,
+const btn = {
+  base: {
+    border: "none",
+    borderRadius: 8,
+    padding: "9px 18px",
+    fontSize: 14,
+    fontWeight: 600,
+    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+  },
 };
-const btnGreen = { ...btnPrimary, background: "#52c41a" };
-const btnOrange = { ...btnPrimary, background: "#fa8c16" };
-const btnRed = { ...btnPrimary, background: "#ff4d4f" };
+const btnPrimary = { ...btn.base, background: "#1677ff", color: "#fff" };
+const btnGreen = { ...btn.base, background: "#52c41a", color: "#fff" };
+const btnOrange = { ...btn.base, background: "#fa8c16", color: "#fff" };
+const btnRed = { ...btn.base, background: "#ff4d4f", color: "#fff" };
 const btnGray = {
-  ...btnPrimary,
+  ...btn.base,
   background: "#fff",
   color: "#595959",
   border: "1px solid #d9d9d9",
@@ -209,6 +213,8 @@ const sectionCard = {
   marginBottom: 20,
   boxShadow: "0 1px 4px rgba(0,0,0,0.05)",
 };
+
+// ─── Main App ─────────────────────────────────────────────────────────────────
 
 export default function App() {
   const [stock, setStock] = useState([]);
@@ -250,22 +256,22 @@ export default function App() {
   const barcodeRef = useRef();
   const pickNoRef = useRef();
 
-  // ─── Firebase ────────────────────────────────────────────────────────────────
+  // ─── Firebase ──────────────────────────────────────────────────────────────
+
   useEffect(() => {
-    const stockRef = dbRef(db, "stock");
-    const ordersRef = dbRef(db, "orders");
     let stockLoaded = false,
       ordersLoaded = false;
     const checkReady = () => {
       if (stockLoaded && ordersLoaded) setDbReady(true);
     };
-    const unsubStock = onValue(stockRef, (snap) => {
+
+    const unsubStock = onValue(dbRef(db, "stock"), (snap) => {
       const val = snap.val();
       setStock(val ? Object.values(val) : []);
       stockLoaded = true;
       checkReady();
     });
-    const unsubOrders = onValue(ordersRef, (snap) => {
+    const unsubOrders = onValue(dbRef(db, "orders"), (snap) => {
       const val = snap.val();
       setOrders(val ? Object.values(val) : []);
       ordersLoaded = true;
@@ -290,7 +296,6 @@ export default function App() {
     });
   }, []);
 
-  // ✅ FIX: cleanObj กรอง undefined ออกก่อนส่ง Firebase ป้องกัน crash
   const updateOrders = useCallback((updater) => {
     setOrders((prev) => {
       const next = typeof updater === "function" ? updater(prev) : updater;
@@ -308,7 +313,8 @@ export default function App() {
     setTimeout(() => setAlertMsg(null), 2800);
   }, []);
 
-  // ─── Derived ─────────────────────────────────────────────────────────────────
+  // ─── Derived ───────────────────────────────────────────────────────────────
+
   const pendingOrders = orders.filter((o) => o.status !== "COMPLETE");
   const completedOrders = orders.filter((o) => o.status === "COMPLETE");
   const displayOrders = showCompleted ? completedOrders : pendingOrders;
@@ -324,14 +330,11 @@ export default function App() {
         o.barcode?.toLowerCase().includes(q)
       );
     })
-    .sort((a, b) => {
-      if (showCompleted) {
-        return (
-          new Date(b.completedAtRaw || 0) - new Date(a.completedAtRaw || 0)
-        );
-      }
-      return new Date(b.createdAtRaw || 0) - new Date(a.createdAtRaw || 0);
-    });
+    .sort((a, b) =>
+      showCompleted
+        ? new Date(b.completedAtRaw || 0) - new Date(a.completedAtRaw || 0)
+        : new Date(b.createdAtRaw || 0) - new Date(a.createdAtRaw || 0)
+    );
 
   const filteredStock = stock.filter((s) => {
     const q = stockSearch.toLowerCase();
@@ -350,9 +353,8 @@ export default function App() {
     return "pending";
   }
 
-  // ─── Pick Logic ───────────────────────────────────────────────────────────────
+  // ─── Sound ─────────────────────────────────────────────────────────────────
 
-  // ─── Sound ───────────────────────────────────────────────────────────────────
   function playSound(type) {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -386,38 +388,36 @@ export default function App() {
     } catch {}
   }
 
+  // ─── Pick Logic ────────────────────────────────────────────────────────────
+
   function executePick(pickQty, stockItem, matchedOrder) {
     updateStock((prev) =>
       prev.map((s) =>
         s.barcode === stockItem.barcode ? { ...s, stock: s.stock - pickQty } : s
       )
     );
-    if (matchedOrder) {
-      const newPicked = (matchedOrder.picked || 0) + pickQty;
-      const isComplete = newPicked >= matchedOrder.required;
-      const completedAt = isComplete ? now() : undefined;
-      const completedAtRaw = isComplete ? new Date().toISOString() : undefined;
-      updateOrders((prev) =>
-        prev.map((o) =>
-          o.id === matchedOrder.id
-            ? cleanObj({
-                ...o,
-                picked: newPicked,
-                status: isComplete ? "COMPLETE" : o.status,
-                completedAt,
-                completedAtRaw,
-              })
-            : o
-        )
-      );
-      playSound("success");
-      setScanStatus(`✅ หยิบสำเร็จ: ${stockItem.product} x${pickQty}`);
-    } else {
-      playSound("success");
-      setScanStatus(
-        `✅ หยิบสำเร็จ: ${stockItem.product} x${pickQty} (ไม่มี Order)`
-      );
-    }
+
+    const newPicked = (matchedOrder.picked || 0) + pickQty;
+    const isComplete = newPicked >= matchedOrder.required;
+    const completedAt = isComplete ? now() : undefined;
+    const completedAtRaw = isComplete ? new Date().toISOString() : undefined;
+
+    updateOrders((prev) =>
+      prev.map((o) =>
+        o.id === matchedOrder.id
+          ? cleanObj({
+              ...o,
+              picked: newPicked,
+              status: isComplete ? "COMPLETE" : o.status,
+              completedAt,
+              completedAtRaw,
+            })
+          : o
+      )
+    );
+
+    playSound("success");
+    setScanStatus(`✅ หยิบสำเร็จ: ${stockItem.product} x${pickQty}`);
     setScanStatusColor("#52c41a");
     setBarcode("");
     setLocation("");
@@ -430,6 +430,7 @@ export default function App() {
     }, 1500);
   }
 
+  // ✅ FIX: บล็อกการหยิบถ้าไม่มี Order ตรงกัน — ไม่ตัด Stock โดยไม่มี Order
   function confirmPick(forceConfirm = false) {
     if (!barcode.trim()) {
       playSound("error");
@@ -457,6 +458,8 @@ export default function App() {
       setScanStatusColor("#ff4d4f");
       return;
     }
+
+    // หา Order ที่ตรงกัน
     let matchedOrder = null;
     if (pickNo.trim()) {
       matchedOrder = orders.find(
@@ -470,7 +473,17 @@ export default function App() {
         (o) => o.barcode === barcode.trim() && o.status !== "COMPLETE"
       );
     }
-    if (matchedOrder && !forceConfirm) {
+
+    // ✅ บล็อกถ้าไม่มี Order — ห้ามตัด Stock
+    if (!matchedOrder) {
+      playSound("error");
+      setScanStatus("❌ ไม่พบ Order ที่ตรงกับ Barcode นี้ — ไม่สามารถหยิบได้");
+      setScanStatusColor("#ff4d4f");
+      return;
+    }
+
+    // เตือนถ้า Qty ไม่ตรง
+    if (!forceConfirm) {
       const remaining = matchedOrder.required - (matchedOrder.picked || 0);
       if (pickQty !== remaining) {
         playSound("warning");
@@ -482,6 +495,7 @@ export default function App() {
         return;
       }
     }
+
     executePick(pickQty, stockItem, matchedOrder);
   }
 
@@ -493,99 +507,55 @@ export default function App() {
     }
   }
 
-  // ─── Export ───────────────────────────────────────────────────────────────────
-  function exportExcel() {
-    const rows = [
-      [
-        "Pick No",
-        "Customer",
-        "Barcode",
-        "Product",
-        "Location",
-        "Required",
-        "Picked",
-        "Status",
-        "Created At",
-        "Completed At",
-        "ใช้เวลา",
-      ],
-    ];
-    orders.forEach((o) => {
-      let duration = "";
-      if (o.completedAtRaw && o.createdAtRaw) {
-        const secs = Math.round(
-          (new Date(o.completedAtRaw) - new Date(o.createdAtRaw)) / 1000
-        );
-        if (secs < 60) duration = secs + " วินาที";
-        else if (secs < 3600) duration = Math.round(secs / 60) + " นาที";
-        else {
-          const h = Math.floor(secs / 3600),
-            m = Math.round((secs % 3600) / 60);
-          duration = h + "ชม. " + m + "น.";
-        }
-      }
-      rows.push([
-        o.pickNo,
-        o.customer,
-        o.barcode,
-        o.product,
-        o.location,
-        o.required,
-        o.picked || 0,
-        o.status,
-        o.createdAt,
-        o.completedAt || "",
-        duration,
-      ]);
-    });
-    const csv = rows.map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
-    const blob = new Blob(["\uFEFF" + csv], {
-      type: "text/csv;charset=utf-8;",
-    });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "pick_orders.csv";
-    a.click();
-  }
+  // ─── Edit Order ────────────────────────────────────────────────────────────
+  // ✅ FIX: ตรวจสอบ id ก่อน + handle completedAt เมื่อ status เปลี่ยนเป็น COMPLETE
 
-  // ─── Backup / Restore ─────────────────────────────────────────────────────────
-  function backupData() {
-    const blob = new Blob(
-      [
-        JSON.stringify(
-          { stock, orders, backupAt: new Date().toISOString() },
-          null,
-          2
-        ),
-      ],
-      { type: "application/json" }
+  function handleEditOrder() {
+    const original = orders.find((o) => o.id === editOrderItem.id);
+    if (!original) {
+      showAlert("ไม่พบ Order นี้ในระบบ", "error");
+      return;
+    }
+
+    const isNowComplete =
+      editOrderItem.status === "COMPLETE" && original.status !== "COMPLETE";
+
+    const updated = cleanObj({
+      ...editOrderItem,
+      completedAt: isNowComplete
+        ? now()
+        : editOrderItem.completedAt ?? original.completedAt,
+      completedAtRaw: isNowComplete
+        ? new Date().toISOString()
+        : editOrderItem.completedAtRaw ?? original.completedAtRaw,
+    });
+
+    updateOrders((prev) =>
+      prev.map((o) => (o.id === updated.id ? updated : o))
     );
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `warehouse_backup_${Date.now()}.json`;
-    a.click();
-    showAlert("Backup สำเร็จ");
+    setEditOrderItem(null);
+    showAlert("แก้ไข Order สำเร็จ");
   }
 
-  function restoreData(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const data = JSON.parse(ev.target.result);
-        if (data.stock) updateStock(data.stock);
-        if (data.orders) updateOrders(data.orders);
-        showAlert("Restore สำเร็จ");
-      } catch {
-        showAlert("ไฟล์ไม่ถูกต้อง", "error");
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = "";
+  // ─── Edit Stock ────────────────────────────────────────────────────────────
+
+  function handleEditStock() {
+    updateStock((prev) =>
+      prev.map((s) => {
+        const key = editStockItem._originalBarcode || editStockItem.barcode;
+        if (s.barcode === key) {
+          const { _originalBarcode, ...rest } = editStockItem;
+          return rest;
+        }
+        return s;
+      })
+    );
+    setEditStockItem(null);
+    showAlert("แก้ไข Stock สำเร็จ");
   }
 
-  // ─── Stock / Order CRUD ───────────────────────────────────────────────────────
+  // ─── Stock / Order Add ─────────────────────────────────────────────────────
+
   function handleAddStock() {
     const { barcode: bc, product, stock: st, location: loc } = addStockForm;
     if (!bc || !product || !st || !loc) {
@@ -650,31 +620,102 @@ export default function App() {
     showAlert("เพิ่ม Order สำเร็จ");
   }
 
-  function handleEditStock() {
-    updateStock((prev) =>
-      prev.map((s) => {
-        // ✅ FIX: match ด้วย barcode เดิม (originalBarcode) กรณีที่ user แก้ barcode ด้วย
-        const key = editStockItem._originalBarcode || editStockItem.barcode;
-        if (s.barcode === key) {
-          const { _originalBarcode, ...rest } = editStockItem;
-          return rest;
+  // ─── Export ────────────────────────────────────────────────────────────────
+
+  function exportExcel() {
+    const rows = [
+      [
+        "Pick No",
+        "Customer",
+        "Barcode",
+        "Product",
+        "Location",
+        "Required",
+        "Picked",
+        "Status",
+        "Created At",
+        "Completed At",
+        "ใช้เวลา",
+      ],
+    ];
+    orders.forEach((o) => {
+      let duration = "";
+      if (o.completedAtRaw && o.createdAtRaw) {
+        const secs = Math.round(
+          (new Date(o.completedAtRaw) - new Date(o.createdAtRaw)) / 1000
+        );
+        if (secs < 60) duration = secs + " วินาที";
+        else if (secs < 3600) duration = Math.round(secs / 60) + " นาที";
+        else {
+          const h = Math.floor(secs / 3600),
+            m = Math.round((secs % 3600) / 60);
+          duration = h + "ชม. " + m + "น.";
         }
-        return s;
-      })
-    );
-    setEditStockItem(null);
-    showAlert("แก้ไขสำเร็จ");
+      }
+      rows.push([
+        o.pickNo,
+        o.customer,
+        o.barcode,
+        o.product,
+        o.location,
+        o.required,
+        o.picked || 0,
+        o.status,
+        o.createdAt,
+        o.completedAt || "",
+        duration,
+      ]);
+    });
+    const csv = rows.map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
+    const blob = new Blob(["\uFEFF" + csv], {
+      type: "text/csv;charset=utf-8;",
+    });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "pick_orders.csv";
+    a.click();
   }
 
-  function handleEditOrder() {
-    updateOrders((prev) =>
-      prev.map((o) => (o.id === editOrderItem.id ? cleanObj(editOrderItem) : o))
+  // ─── Backup / Restore ──────────────────────────────────────────────────────
+
+  function backupData() {
+    const blob = new Blob(
+      [
+        JSON.stringify(
+          { stock, orders, backupAt: new Date().toISOString() },
+          null,
+          2
+        ),
+      ],
+      { type: "application/json" }
     );
-    setEditOrderItem(null);
-    showAlert("แก้ไขสำเร็จ");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `warehouse_backup_${Date.now()}.json`;
+    a.click();
+    showAlert("Backup สำเร็จ");
   }
 
-  // ─── Excel Import ─────────────────────────────────────────────────────────────
+  function restoreData(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (data.stock) updateStock(data.stock);
+        if (data.orders) updateOrders(data.orders);
+        showAlert("Restore สำเร็จ");
+      } catch {
+        showAlert("ไฟล์ไม่ถูกต้อง", "error");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  }
+
+  // ─── Excel Import ──────────────────────────────────────────────────────────
+
   function downloadStockTemplate() {
     const ws = XLSX.utils.aoa_to_sheet([
       ["barcode", "product", "stock", "location"],
@@ -833,7 +874,35 @@ export default function App() {
     setXlsxPreview(null);
   }
 
-  // ─── Loading ──────────────────────────────────────────────────────────────────
+  // ─── Duration Helper ───────────────────────────────────────────────────────
+
+  function formatDuration(o) {
+    if (!o.completedAtRaw || !o.createdAtRaw) return null;
+    const secs = Math.round(
+      (new Date(o.completedAtRaw) - new Date(o.createdAtRaw)) / 1000
+    );
+    const mins = Math.floor(secs / 60);
+    if (secs < 60)
+      return (
+        <span style={{ color: "#722ed1", fontWeight: 700, fontSize: 13 }}>
+          {secs} วิ
+        </span>
+      );
+    if (mins < 60)
+      return (
+        <span style={{ color: "#52c41a", fontWeight: 700, fontSize: 13 }}>
+          {mins} นาที
+        </span>
+      );
+    return (
+      <span style={{ color: "#fa8c16", fontWeight: 700, fontSize: 13 }}>
+        {Math.floor(mins / 60)}ชม. {mins % 60}น.
+      </span>
+    );
+  }
+
+  // ─── Loading ───────────────────────────────────────────────────────────────
+
   if (!dbReady)
     return (
       <div
@@ -857,6 +926,8 @@ export default function App() {
         </div>
       </div>
     );
+
+  // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div
@@ -1005,6 +1076,11 @@ export default function App() {
           >
             💡 วิธีใช้: กรอก Pick No → สแกน/กรอก Barcode แล้วกด Enter —
             ระบบจะบันทึกการหยิบอัตโนมัติทันที
+            <br />
+            <span style={{ color: "#cf1322", fontWeight: 600 }}>
+              ⚠️ ต้องมี Order ที่ตรงกันก่อนจึงจะหยิบสินค้าได้ — ระบบจะไม่ตัด
+              Stock โดยไม่มี Order
+            </span>
           </div>
           <div
             style={{
@@ -1088,7 +1164,7 @@ export default function App() {
             </span>
           </div>
 
-          {/* ✅ Warning banner เมื่อ qty ไม่ตรง */}
+          {/* Warning banner เมื่อ qty ไม่ตรง */}
           {pendingPickData && (
             <div
               style={{
@@ -1393,51 +1469,7 @@ export default function App() {
                         <td
                           style={{ padding: "10px 12px", textAlign: "center" }}
                         >
-                          {o.completedAtRaw && o.createdAtRaw ? (
-                            (() => {
-                              const secs = Math.round(
-                                (new Date(o.completedAtRaw) -
-                                  new Date(o.createdAtRaw)) /
-                                  1000
-                              );
-                              const mins = Math.floor(secs / 60);
-                              if (secs < 60)
-                                return (
-                                  <span
-                                    style={{
-                                      color: "#722ed1",
-                                      fontWeight: 700,
-                                      fontSize: 13,
-                                    }}
-                                  >
-                                    {secs} วิ
-                                  </span>
-                                );
-                              if (mins < 60)
-                                return (
-                                  <span
-                                    style={{
-                                      color: "#52c41a",
-                                      fontWeight: 700,
-                                      fontSize: 13,
-                                    }}
-                                  >
-                                    {mins} นาที
-                                  </span>
-                                );
-                              return (
-                                <span
-                                  style={{
-                                    color: "#fa8c16",
-                                    fontWeight: 700,
-                                    fontSize: 13,
-                                  }}
-                                >
-                                  {Math.floor(mins / 60)}ชม. {mins % 60}น.
-                                </span>
-                              );
-                            })()
-                          ) : (
+                          {formatDuration(o) ?? (
                             <span style={{ color: "#d9d9d9", fontSize: 12 }}>
                               -
                             </span>
@@ -1504,6 +1536,7 @@ export default function App() {
             marginBottom: 20,
           }}
         >
+          {/* Add Stock */}
           <div style={sectionCard}>
             <div
               style={{
@@ -1596,6 +1629,7 @@ export default function App() {
             </div>
           </div>
 
+          {/* Add Order */}
           <div style={sectionCard}>
             <div
               style={{
@@ -2023,6 +2057,21 @@ export default function App() {
                 <option>COMPLETE</option>
               </select>
             </div>
+            {editOrderItem.status === "COMPLETE" &&
+              !editOrderItem.completedAt && (
+                <div
+                  style={{
+                    background: "#f6ffed",
+                    border: "1px solid #b7eb8f",
+                    borderRadius: 8,
+                    padding: "8px 12px",
+                    fontSize: 12,
+                    color: "#389e0d",
+                  }}
+                >
+                  ✅ ระบบจะบันทึกเวลา Completed At อัตโนมัติเมื่อกดบันทึก
+                </div>
+              )}
             <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
               <button
                 style={{ ...btnPrimary, flex: 1 }}
