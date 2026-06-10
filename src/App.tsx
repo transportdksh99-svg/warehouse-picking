@@ -21,31 +21,28 @@ function generateId() {
     "PO" + Date.now().toString().slice(-6) + Math.floor(Math.random() * 100)
   );
 }
-
 function now() {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
+  const d = new Date(),
+    pad = (n) => String(n).padStart(2, "0");
   return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${
     d.getFullYear() + 543
   } ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
-
 function cleanObj(obj) {
   return Object.fromEntries(
     Object.entries(obj).filter(([, v]) => v !== undefined && v !== null)
   );
 }
 
-// ─── UI Components ────────────────────────────────────────────────────────────
-
+// ── UI atoms ──────────────────────────────────────────────────────────────────
 function Badge({ children, color = "gray" }) {
-  const colors = {
+  const C = {
     pending: { bg: "#fff7e6", text: "#d46b08", border: "#ffd591" },
     complete: { bg: "#f6ffed", text: "#389e0d", border: "#b7eb8f" },
     over3h: { bg: "#fff1f0", text: "#cf1322", border: "#ffa39e" },
     gray: { bg: "#f5f5f5", text: "#595959", border: "#d9d9d9" },
   };
-  const c = colors[color] || colors.gray;
+  const c = C[color] || C.gray;
   return (
     <span
       style={{
@@ -62,7 +59,6 @@ function Badge({ children, color = "gray" }) {
     </span>
   );
 }
-
 function StatCard({ icon, value, label, color = "#1677ff" }) {
   return (
     <div
@@ -105,7 +101,6 @@ function StatCard({ icon, value, label, color = "#1677ff" }) {
     </div>
   );
 }
-
 function Modal({ open, onClose, title, children }) {
   if (!open) return null;
   return (
@@ -163,9 +158,8 @@ function Modal({ open, onClose, title, children }) {
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
-const inputStyle = {
+// ── Style tokens ──────────────────────────────────────────────────────────────
+const inp = {
   border: "1px solid #d9d9d9",
   borderRadius: 8,
   padding: "8px 12px",
@@ -176,7 +170,7 @@ const inputStyle = {
   fontFamily: "inherit",
   transition: "border 0.2s",
 };
-const btn = {
+const B = {
   base: {
     border: "none",
     borderRadius: 8,
@@ -189,23 +183,23 @@ const btn = {
     gap: 6,
   },
 };
-const btnPrimary = { ...btn.base, background: "#1677ff", color: "#fff" };
-const btnGreen = { ...btn.base, background: "#52c41a", color: "#fff" };
-const btnOrange = { ...btn.base, background: "#fa8c16", color: "#fff" };
-const btnRed = { ...btn.base, background: "#ff4d4f", color: "#fff" };
-const btnGray = {
-  ...btn.base,
+const bP = { ...B.base, background: "#1677ff", color: "#fff" };
+const bG = { ...B.base, background: "#52c41a", color: "#fff" };
+const bO = { ...B.base, background: "#fa8c16", color: "#fff" };
+const bR = { ...B.base, background: "#ff4d4f", color: "#fff" };
+const bGr = {
+  ...B.base,
   background: "#fff",
   color: "#595959",
   border: "1px solid #d9d9d9",
 };
-const labelStyle = {
+const lbl = {
   fontSize: 13,
   color: "#595959",
   marginBottom: 4,
   display: "block",
 };
-const sectionCard = {
+const card = {
   background: "#fff",
   borderRadius: 14,
   border: "1px solid #f0f0f0",
@@ -214,8 +208,7 @@ const sectionCard = {
   boxShadow: "0 1px 4px rgba(0,0,0,0.05)",
 };
 
-// ─── Main App ─────────────────────────────────────────────────────────────────
-
+// ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
   const [stock, setStock] = useState([]);
   const [orders, setOrders] = useState([]);
@@ -251,54 +244,47 @@ export default function App() {
   const [alertMsg, setAlertMsg] = useState(null);
   const [xlsxPreview, setXlsxPreview] = useState(null);
   const [stockSearch, setStockSearch] = useState("");
-  const [pendingPickData, setPendingPickData] = useState(null);
 
   const barcodeRef = useRef();
-  const pickNoRef = useRef();
 
-  // ─── Firebase ──────────────────────────────────────────────────────────────
-
+  // ── Firebase ────────────────────────────────────────────────────────────────
   useEffect(() => {
-    let stockLoaded = false,
-      ordersLoaded = false;
-    const checkReady = () => {
-      if (stockLoaded && ordersLoaded) setDbReady(true);
+    let sL = false,
+      oL = false;
+    const check = () => {
+      if (sL && oL) setDbReady(true);
     };
-
-    const unsubStock = onValue(dbRef(db, "stock"), (snap) => {
-      const val = snap.val();
-      setStock(val ? Object.values(val) : []);
-      stockLoaded = true;
-      checkReady();
+    const u1 = onValue(dbRef(db, "stock"), (s) => {
+      setStock(s.val() ? Object.values(s.val()) : []);
+      sL = true;
+      check();
     });
-    const unsubOrders = onValue(dbRef(db, "orders"), (snap) => {
-      const val = snap.val();
-      setOrders(val ? Object.values(val) : []);
-      ordersLoaded = true;
-      checkReady();
+    const u2 = onValue(dbRef(db, "orders"), (s) => {
+      setOrders(s.val() ? Object.values(s.val()) : []);
+      oL = true;
+      check();
     });
     return () => {
-      unsubStock();
-      unsubOrders();
+      u1();
+      u2();
     };
   }, []);
 
-  const updateStock = useCallback((updater) => {
+  const updateStock = useCallback((fn) => {
     setStock((prev) => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
+      const next = typeof fn === "function" ? fn(prev) : fn;
       const obj = {};
       next.forEach((s) => {
-        const key = String(s.barcode).replace(/[^a-zA-Z0-9_-]/g, "_");
-        obj[key] = cleanObj(s);
+        obj[String(s.barcode).replace(/[^a-zA-Z0-9_-]/g, "_")] = cleanObj(s);
       });
       set(dbRef(db, "stock"), next.length ? obj : null);
       return next;
     });
   }, []);
 
-  const updateOrders = useCallback((updater) => {
+  const updateOrders = useCallback((fn) => {
     setOrders((prev) => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
+      const next = typeof fn === "function" ? fn(prev) : fn;
       const obj = {};
       next.forEach((o) => {
         obj[o.id] = cleanObj(o);
@@ -308,13 +294,13 @@ export default function App() {
     });
   }, []);
 
+  // ── Alert (success / warning / error) ──────────────────────────────────────
   const showAlert = useCallback((msg, type = "success") => {
     setAlertMsg({ msg, type });
-    setTimeout(() => setAlertMsg(null), 2800);
+    setTimeout(() => setAlertMsg(null), 3000);
   }, []);
 
-  // ─── Derived ───────────────────────────────────────────────────────────────
-
+  // ── Derived ─────────────────────────────────────────────────────────────────
   const pendingOrders = orders.filter((o) => o.status !== "COMPLETE");
   const completedOrders = orders.filter((o) => o.status === "COMPLETE");
   const displayOrders = showCompleted ? completedOrders : pendingOrders;
@@ -353,8 +339,7 @@ export default function App() {
     return "pending";
   }
 
-  // ─── Sound ─────────────────────────────────────────────────────────────────
-
+  // ── Sound ────────────────────────────────────────────────────────────────────
   function playSound(type) {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -369,13 +354,6 @@ export default function App() {
         gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
         osc.start(ctx.currentTime);
         osc.stop(ctx.currentTime + 0.3);
-      } else if (type === "error") {
-        osc.frequency.setValueAtTime(300, ctx.currentTime);
-        osc.frequency.setValueAtTime(200, ctx.currentTime + 0.15);
-        gain.gain.setValueAtTime(0.4, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
-        osc.start(ctx.currentTime);
-        osc.stop(ctx.currentTime + 0.4);
       } else if (type === "warning") {
         osc.frequency.setValueAtTime(600, ctx.currentTime);
         osc.frequency.setValueAtTime(500, ctx.currentTime + 0.1);
@@ -384,13 +362,20 @@ export default function App() {
         gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
         osc.start(ctx.currentTime);
         osc.stop(ctx.currentTime + 0.35);
+      } else {
+        osc.frequency.setValueAtTime(300, ctx.currentTime);
+        osc.frequency.setValueAtTime(200, ctx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.4, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.4);
       }
     } catch {}
   }
 
-  // ─── Pick Logic ────────────────────────────────────────────────────────────
-
+  // ── Pick ─────────────────────────────────────────────────────────────────────
   function executePick(pickQty, stockItem, matchedOrder) {
+    // ลด stock
     updateStock((prev) =>
       prev.map((s) =>
         s.barcode === stockItem.barcode ? { ...s, stock: s.stock - pickQty } : s
@@ -399,6 +384,7 @@ export default function App() {
 
     const newPicked = (matchedOrder.picked || 0) + pickQty;
     const isComplete = newPicked >= matchedOrder.required;
+    const remaining = matchedOrder.required - newPicked;
     const completedAt = isComplete ? now() : undefined;
     const completedAtRaw = isComplete ? new Date().toISOString() : undefined;
 
@@ -416,22 +402,35 @@ export default function App() {
       )
     );
 
-    playSound("success");
-    setScanStatus(`✅ หยิบสำเร็จ: ${stockItem.product} x${pickQty}`);
-    setScanStatusColor("#52c41a");
+    if (isComplete) {
+      // ✅ หยิบครบ
+      playSound("success");
+      setScanStatus(`✅ หยิบครบ: ${stockItem.product} x${pickQty}`);
+      setScanStatusColor("#52c41a");
+    } else {
+      // ⚠️ หยิบบางส่วน — แจ้งเตือนเฉยๆ ไม่ block
+      playSound("warning");
+      setScanStatus(
+        `⚠️ หยิบบางส่วน: ${stockItem.product} x${pickQty} — ยังต้องหยิบอีก ${remaining} ชิ้น`
+      );
+      setScanStatusColor("#fa8c16");
+      showAlert(
+        `⚠️ Order ${matchedOrder.pickNo} — หยิบแล้ว ${newPicked}/${matchedOrder.required} ยังเหลืออีก ${remaining} ชิ้น`,
+        "warning"
+      );
+    }
+
     setBarcode("");
     setLocation("");
     setQty(1);
-    setPendingPickData(null);
     setTimeout(() => {
       setScanStatus("พร้อมสแกน");
       setScanStatusColor("#52c41a");
       barcodeRef.current?.focus();
-    }, 1500);
+    }, 2200);
   }
 
-  // ✅ FIX: บล็อกการหยิบถ้าไม่มี Order ตรงกัน — ไม่ตัด Stock โดยไม่มี Order
-  function confirmPick(forceConfirm = false) {
+  function confirmPick() {
     if (!barcode.trim()) {
       playSound("error");
       setScanStatus("❌ กรุณากรอก Barcode");
@@ -474,28 +473,15 @@ export default function App() {
       );
     }
 
-    // ✅ บล็อกถ้าไม่มี Order — ห้ามตัด Stock
+    // ✅ ต้องมี Order — ห้ามตัด Stock โดยไม่มี Order
     if (!matchedOrder) {
       playSound("error");
-      setScanStatus("❌ ไม่พบ Order ที่ตรงกับ Barcode นี้ — ไม่สามารถหยิบได้");
+      setScanStatus("❌ ไม่พบ Order ที่ตรงกับ Barcode นี้");
       setScanStatusColor("#ff4d4f");
       return;
     }
 
-    // เตือนถ้า Qty ไม่ตรง
-    if (!forceConfirm) {
-      const remaining = matchedOrder.required - (matchedOrder.picked || 0);
-      if (pickQty !== remaining) {
-        playSound("warning");
-        setPendingPickData({ pickQty, stockItem, matchedOrder, remaining });
-        setScanStatus(
-          `⚠️ Qty ไม่ตรง — ต้องหยิบอีก ${remaining} ชิ้น แต่กรอก ${pickQty}`
-        );
-        setScanStatusColor("#fa8c16");
-        return;
-      }
-    }
-
+    // ✅ หยิบได้เลยทุกกรณี (ทั้งครบและบางส่วน) — แค่แจ้งเตือนถ้าไม่ครบ
     executePick(pickQty, stockItem, matchedOrder);
   }
 
@@ -503,13 +489,11 @@ export default function App() {
     if (e.key === "Enter") {
       const found = stock.find((s) => s.barcode === barcode.trim());
       if (found && !location) setLocation(found.location);
-      if (autoConfirm) setTimeout(() => confirmPick(false), 50);
+      if (autoConfirm) setTimeout(() => confirmPick(), 50);
     }
   }
 
-  // ─── Edit Order ────────────────────────────────────────────────────────────
-  // ✅ FIX: ตรวจสอบ id ก่อน + handle completedAt เมื่อ status เปลี่ยนเป็น COMPLETE
-
+  // ── Edit Order (fix: ตรวจ id + handle completedAt) ──────────────────────────
   function handleEditOrder() {
     const original = orders.find((o) => o.id === editOrderItem.id);
     if (!original) {
@@ -519,7 +503,6 @@ export default function App() {
 
     const isNowComplete =
       editOrderItem.status === "COMPLETE" && original.status !== "COMPLETE";
-
     const updated = cleanObj({
       ...editOrderItem,
       completedAt: isNowComplete
@@ -529,7 +512,6 @@ export default function App() {
         ? new Date().toISOString()
         : editOrderItem.completedAtRaw ?? original.completedAtRaw,
     });
-
     updateOrders((prev) =>
       prev.map((o) => (o.id === updated.id ? updated : o))
     );
@@ -537,8 +519,7 @@ export default function App() {
     showAlert("แก้ไข Order สำเร็จ");
   }
 
-  // ─── Edit Stock ────────────────────────────────────────────────────────────
-
+  // ── Edit Stock ───────────────────────────────────────────────────────────────
   function handleEditStock() {
     updateStock((prev) =>
       prev.map((s) => {
@@ -554,16 +535,14 @@ export default function App() {
     showAlert("แก้ไข Stock สำเร็จ");
   }
 
-  // ─── Stock / Order Add ─────────────────────────────────────────────────────
-
+  // ── Add Stock / Order ────────────────────────────────────────────────────────
   function handleAddStock() {
     const { barcode: bc, product, stock: st, location: loc } = addStockForm;
     if (!bc || !product || !st || !loc) {
       showAlert("กรุณากรอกข้อมูลให้ครบ", "error");
       return;
     }
-    const existing = stock.find((s) => s.barcode === bc);
-    if (existing) {
+    if (stock.find((s) => s.barcode === bc)) {
       updateStock((prev) =>
         prev.map((s) =>
           s.barcode === bc
@@ -595,20 +574,22 @@ export default function App() {
       return;
     }
     const id = generateId();
-    const newOrder = cleanObj({
-      id,
-      pickNo: addOrderForm.pickNo || id,
-      customer,
-      barcode: bc,
-      product,
-      location: loc,
-      required: Number(required) || 1,
-      picked: 0,
-      status: "PENDING",
-      createdAt: now(),
-      createdAtRaw: new Date().toISOString(),
-    });
-    updateOrders((prev) => [...prev, newOrder]);
+    updateOrders((prev) => [
+      ...prev,
+      cleanObj({
+        id,
+        pickNo: addOrderForm.pickNo || id,
+        customer,
+        barcode: bc,
+        product,
+        location: loc,
+        required: Number(required) || 1,
+        picked: 0,
+        status: "PENDING",
+        createdAt: now(),
+        createdAtRaw: new Date().toISOString(),
+      }),
+    ]);
     setAddOrderForm({
       pickNo: "",
       customer: "",
@@ -620,8 +601,7 @@ export default function App() {
     showAlert("เพิ่ม Order สำเร็จ");
   }
 
-  // ─── Export ────────────────────────────────────────────────────────────────
-
+  // ── Export ───────────────────────────────────────────────────────────────────
   function exportExcel() {
     const rows = [
       [
@@ -639,18 +619,20 @@ export default function App() {
       ],
     ];
     orders.forEach((o) => {
-      let duration = "";
+      let dur = "";
       if (o.completedAtRaw && o.createdAtRaw) {
-        const secs = Math.round(
+        const s = Math.round(
           (new Date(o.completedAtRaw) - new Date(o.createdAtRaw)) / 1000
         );
-        if (secs < 60) duration = secs + " วินาที";
-        else if (secs < 3600) duration = Math.round(secs / 60) + " นาที";
-        else {
-          const h = Math.floor(secs / 3600),
-            m = Math.round((secs % 3600) / 60);
-          duration = h + "ชม. " + m + "น.";
-        }
+        dur =
+          s < 60
+            ? s + " วินาที"
+            : s < 3600
+            ? Math.round(s / 60) + " นาที"
+            : Math.floor(s / 3600) +
+              "ชม. " +
+              Math.round((s % 3600) / 60) +
+              "น.";
       }
       rows.push([
         o.pickNo,
@@ -663,7 +645,7 @@ export default function App() {
         o.status,
         o.createdAt,
         o.completedAt || "",
-        duration,
+        dur,
       ]);
     });
     const csv = rows.map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
@@ -676,8 +658,7 @@ export default function App() {
     a.click();
   }
 
-  // ─── Backup / Restore ──────────────────────────────────────────────────────
-
+  // ── Backup / Restore ─────────────────────────────────────────────────────────
   function backupData() {
     const blob = new Blob(
       [
@@ -695,27 +676,25 @@ export default function App() {
     a.click();
     showAlert("Backup สำเร็จ");
   }
-
   function restoreData(e) {
     const file = e.target.files[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
+    const r = new FileReader();
+    r.onload = (ev) => {
       try {
-        const data = JSON.parse(ev.target.result);
-        if (data.stock) updateStock(data.stock);
-        if (data.orders) updateOrders(data.orders);
+        const d = JSON.parse(ev.target.result);
+        if (d.stock) updateStock(d.stock);
+        if (d.orders) updateOrders(d.orders);
         showAlert("Restore สำเร็จ");
       } catch {
         showAlert("ไฟล์ไม่ถูกต้อง", "error");
       }
     };
-    reader.readAsText(file);
+    r.readAsText(file);
     e.target.value = "";
   }
 
-  // ─── Excel Import ──────────────────────────────────────────────────────────
-
+  // ── Excel import ─────────────────────────────────────────────────────────────
   function downloadStockTemplate() {
     const ws = XLSX.utils.aoa_to_sheet([
       ["barcode", "product", "stock", "location"],
@@ -726,7 +705,6 @@ export default function App() {
     XLSX.utils.book_append_sheet(wb, ws, "Stock");
     XLSX.writeFile(wb, "stock_template.xlsx");
   }
-
   function downloadOrderTemplate() {
     const ws = XLSX.utils.aoa_to_sheet([
       ["pickNo", "customer", "barcode", "product", "location", "required"],
@@ -744,83 +722,80 @@ export default function App() {
     XLSX.utils.book_append_sheet(wb, ws, "Orders");
     XLSX.writeFile(wb, "order_template.xlsx");
   }
-
   function parseStockXlsx(file) {
-    const reader = new FileReader();
-    reader.onload = (ev) => {
+    const r = new FileReader();
+    r.onload = (ev) => {
       try {
         const wb = XLSX.read(ev.target.result, { type: "array" });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const raw = XLSX.utils.sheet_to_json(ws, { defval: "" });
         const errors = [];
         const rows = raw
-          .map((r, i) => {
+          .map((x, i) => {
             const row = {
               barcode: String(
-                r.barcode || r.Barcode || r["บาร์โค้ด"] || ""
+                x.barcode || x.Barcode || x["บาร์โค้ด"] || ""
               ).trim(),
               product: String(
-                r.product || r.Product || r["ชื่อสินค้า"] || ""
+                x.product || x.Product || x["ชื่อสินค้า"] || ""
               ).trim(),
-              stock: Number(r.stock || r.Stock || r["จำนวน"] || 0),
+              stock: Number(x.stock || x.Stock || x["จำนวน"] || 0),
               location: String(
-                r.location || r.Location || r["ที่เก็บ"] || ""
+                x.location || x.Location || x["ที่เก็บ"] || ""
               ).trim(),
             };
             if (!row.barcode) errors.push(`แถว ${i + 2}: ไม่มี Barcode`);
             if (!row.product) errors.push(`แถว ${i + 2}: ไม่มีชื่อสินค้า`);
             return row;
           })
-          .filter((r) => r.barcode);
+          .filter((x) => x.barcode);
         setXlsxPreview({ type: "stock", rows, errors });
       } catch {
         showAlert("ไม่สามารถอ่านไฟล์ได้", "error");
       }
     };
-    reader.readAsArrayBuffer(file);
+    r.readAsArrayBuffer(file);
   }
-
   function parseOrderXlsx(file) {
-    const reader = new FileReader();
-    reader.onload = (ev) => {
+    const r = new FileReader();
+    r.onload = (ev) => {
       try {
         const wb = XLSX.read(ev.target.result, { type: "array" });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const raw = XLSX.utils.sheet_to_json(ws, { defval: "" });
         const errors = [];
         const rows = raw
-          .map((r, i) => {
+          .map((x, i) => {
             const row = {
               pickNo: String(
-                r.pickNo || r["Pick No"] || r.pick_no || ""
+                x.pickNo || x["Pick No"] || x.pick_no || ""
               ).trim(),
               customer: String(
-                r.customer || r.Customer || r["ลูกค้า"] || ""
+                x.customer || x.Customer || x["ลูกค้า"] || ""
               ).trim(),
               barcode: String(
-                r.barcode || r.Barcode || r["บาร์โค้ด"] || ""
+                x.barcode || x.Barcode || x["บาร์โค้ด"] || ""
               ).trim(),
               product: String(
-                r.product || r.Product || r["สินค้า"] || r["ชื่อสินค้า"] || ""
+                x.product || x.Product || x["สินค้า"] || x["ชื่อสินค้า"] || ""
               ).trim(),
               location: String(
-                r.location || r.Location || r["ที่เก็บ"] || ""
+                x.location || x.Location || x["ที่เก็บ"] || ""
               ).trim(),
-              required: Number(r.required || r.Required || r["จำนวน"] || 1),
+              required: Number(x.required || x.Required || x["จำนวน"] || 1),
             };
             if (!row.barcode) errors.push(`แถว ${i + 2}: ไม่มี Barcode`);
             if (!row.product) errors.push(`แถว ${i + 2}: ไม่มีชื่อสินค้า`);
             return row;
           })
-          .filter((r) => r.barcode);
+          .filter((x) => x.barcode);
         setXlsxPreview({ type: "order", rows, errors });
       } catch {
         showAlert("ไม่สามารถอ่านไฟล์ได้", "error");
       }
     };
-    reader.readAsArrayBuffer(file);
+    r.readAsArrayBuffer(file);
   }
-
   function handleStockXlsx(e) {
     const f = e.target.files[0];
     if (f) parseStockXlsx(f);
@@ -831,78 +806,77 @@ export default function App() {
     if (f) parseOrderXlsx(f);
     e.target.value = "";
   }
-
   function confirmXlsxImport() {
     if (!xlsxPreview) return;
     if (xlsxPreview.type === "stock") {
       updateStock((prev) => {
-        const updated = [...prev];
+        const u = [...prev];
         xlsxPreview.rows.forEach((r) => {
-          const idx = updated.findIndex((s) => s.barcode === r.barcode);
-          if (idx >= 0)
-            updated[idx] = {
-              ...updated[idx],
-              stock: updated[idx].stock + r.stock,
-              location: r.location || updated[idx].location,
-              product: r.product || updated[idx].product,
+          const i = u.findIndex((s) => s.barcode === r.barcode);
+          if (i >= 0)
+            u[i] = {
+              ...u[i],
+              stock: u[i].stock + r.stock,
+              location: r.location || u[i].location,
+              product: r.product || u[i].product,
             };
-          else updated.push(r);
+          else u.push(r);
         });
-        return updated;
+        return u;
       });
       showAlert(`นำเข้าสต็อกสำเร็จ ${xlsxPreview.rows.length} รายการ`);
     } else {
-      const newOrders = xlsxPreview.rows.map((r) => {
-        const id = generateId();
-        return cleanObj({
-          id,
-          pickNo: r.pickNo || id,
-          customer: r.customer,
-          barcode: r.barcode,
-          product: r.product,
-          location: r.location,
-          required: r.required,
-          picked: 0,
-          status: "PENDING",
-          createdAt: now(),
-          createdAtRaw: new Date().toISOString(),
-        });
-      });
-      updateOrders((prev) => [...prev, ...newOrders]);
-      showAlert(`นำเข้า Order สำเร็จ ${newOrders.length} รายการ`);
+      updateOrders((prev) => [
+        ...prev,
+        ...xlsxPreview.rows.map((r) => {
+          const id = generateId();
+          return cleanObj({
+            id,
+            pickNo: r.pickNo || id,
+            customer: r.customer,
+            barcode: r.barcode,
+            product: r.product,
+            location: r.location,
+            required: r.required,
+            picked: 0,
+            status: "PENDING",
+            createdAt: now(),
+            createdAtRaw: new Date().toISOString(),
+          });
+        }),
+      ]);
+      showAlert(`นำเข้า Order สำเร็จ ${xlsxPreview.rows.length} รายการ`);
     }
     setXlsxPreview(null);
   }
 
-  // ─── Duration Helper ───────────────────────────────────────────────────────
-
-  function formatDuration(o) {
+  // ── Duration ─────────────────────────────────────────────────────────────────
+  function fmtDur(o) {
     if (!o.completedAtRaw || !o.createdAtRaw) return null;
-    const secs = Math.round(
-      (new Date(o.completedAtRaw) - new Date(o.createdAtRaw)) / 1000
-    );
-    const mins = Math.floor(secs / 60);
-    if (secs < 60)
+    const s = Math.round(
+        (new Date(o.completedAtRaw) - new Date(o.createdAtRaw)) / 1000
+      ),
+      m = Math.floor(s / 60);
+    if (s < 60)
       return (
         <span style={{ color: "#722ed1", fontWeight: 700, fontSize: 13 }}>
-          {secs} วิ
+          {s} วิ
         </span>
       );
-    if (mins < 60)
+    if (m < 60)
       return (
         <span style={{ color: "#52c41a", fontWeight: 700, fontSize: 13 }}>
-          {mins} นาที
+          {m} นาที
         </span>
       );
     return (
       <span style={{ color: "#fa8c16", fontWeight: 700, fontSize: 13 }}>
-        {Math.floor(mins / 60)}ชม. {mins % 60}น.
+        {Math.floor(m / 60)}ชม. {m % 60}น.
       </span>
     );
   }
 
-  // ─── Loading ───────────────────────────────────────────────────────────────
-
+  // ── Loading ──────────────────────────────────────────────────────────────────
   if (!dbReady)
     return (
       <div
@@ -914,7 +888,7 @@ export default function App() {
           justifyContent: "center",
           flexDirection: "column",
           gap: 16,
-          fontFamily: "'Noto Sans Thai', sans-serif",
+          fontFamily: "'Noto Sans Thai',sans-serif",
         }}
       >
         <div style={{ fontSize: 40 }}>🔥</div>
@@ -927,18 +901,24 @@ export default function App() {
       </div>
     );
 
-  // ─── Render ────────────────────────────────────────────────────────────────
+  // ── Render ───────────────────────────────────────────────────────────────────
+  const alertBg =
+    alertMsg?.type === "error"
+      ? "#ff4d4f"
+      : alertMsg?.type === "warning"
+      ? "#fa8c16"
+      : "#52c41a";
 
   return (
     <div
       style={{
         background: "#f7f8fa",
         minHeight: "100vh",
-        fontFamily: "'Noto Sans Thai', sans-serif",
+        fontFamily: "'Noto Sans Thai',sans-serif",
         color: "#262626",
       }}
     >
-      {/* Alert Toast */}
+      {/* Toast */}
       {alertMsg && (
         <div
           style={{
@@ -946,7 +926,7 @@ export default function App() {
             top: 20,
             right: 20,
             zIndex: 2000,
-            background: alertMsg.type === "error" ? "#ff4d4f" : "#52c41a",
+            background: alertBg,
             color: "#fff",
             borderRadius: 10,
             padding: "12px 22px",
@@ -954,9 +934,14 @@ export default function App() {
             fontSize: 14,
             boxShadow: "0 4px 16px rgba(0,0,0,0.18)",
             animation: "fadein 0.3s",
+            maxWidth: 360,
           }}
         >
-          {alertMsg.type === "error" ? "❌ " : "✅ "}
+          {alertMsg.type === "error"
+            ? "❌ "
+            : alertMsg.type === "warning"
+            ? "⚠️ "
+            : "✅ "}
           {alertMsg.msg}
         </div>
       )}
@@ -988,22 +973,22 @@ export default function App() {
           style={{ display: "none" }}
           onChange={restoreData}
         />
-        <button style={btnGray} onClick={backupData}>
+        <button style={bGr} onClick={backupData}>
           💾 Backup
         </button>
         <button
-          style={btnGray}
+          style={bGr}
           onClick={() => document.getElementById("restore-file").click()}
         >
           🔄 Restore
         </button>
-        <button style={btnRed} onClick={() => setConfirmClear(true)}>
+        <button style={bR} onClick={() => setConfirmClear(true)}>
           🗑️ ล้างข้อมูลวันนี้
         </button>
       </div>
 
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 20px" }}>
-        {/* Stat Cards */}
+        {/* Stats */}
         <div
           style={{
             display: "flex",
@@ -1038,8 +1023,8 @@ export default function App() {
           />
         </div>
 
-        {/* Scanner Section */}
-        <div style={sectionCard}>
+        {/* Scanner */}
+        <div style={card}>
           <div
             style={{
               display: "flex",
@@ -1054,7 +1039,7 @@ export default function App() {
             <button
               onClick={() => setAutoConfirm((v) => !v)}
               style={{
-                ...btnPrimary,
+                ...bP,
                 background: autoConfirm ? "#52c41a" : "#8c8c8c",
                 fontSize: 12,
                 padding: "4px 12px",
@@ -1063,6 +1048,8 @@ export default function App() {
               ⚡ Auto Confirm {autoConfirm ? "เปิดอยู่" : "ปิดอยู่"}
             </button>
           </div>
+
+          {/* Info bar */}
           <div
             style={{
               background: "#fffbe6",
@@ -1078,10 +1065,11 @@ export default function App() {
             ระบบจะบันทึกการหยิบอัตโนมัติทันที
             <br />
             <span style={{ color: "#cf1322", fontWeight: 600 }}>
-              ⚠️ ต้องมี Order ที่ตรงกันก่อนจึงจะหยิบสินค้าได้ — ระบบจะไม่ตัด
-              Stock โดยไม่มี Order
+              ⚠️ ต้องมี Order ที่ตรงกันก่อนจึงจะหยิบสินค้าได้ — หยิบบางส่วนได้
+              ระบบจะแจ้งเตือนยอดคงเหลือ
             </span>
           </div>
+
           <div
             style={{
               display: "flex",
@@ -1091,10 +1079,9 @@ export default function App() {
             }}
           >
             <div style={{ flex: "1 1 180px" }}>
-              <label style={labelStyle}>Pick No</label>
+              <label style={lbl}>Pick No</label>
               <input
-                ref={pickNoRef}
-                style={inputStyle}
+                style={inp}
                 value={pickNo}
                 onChange={(e) => setPickNo(e.target.value)}
                 placeholder="สแกนหรือกรอก Pick No"
@@ -1104,7 +1091,7 @@ export default function App() {
               />
             </div>
             <div style={{ flex: "1 1 220px" }}>
-              <label style={labelStyle}>
+              <label style={lbl}>
                 Barcode{" "}
                 <span style={{ color: "#8c8c8c", fontWeight: 400 }}>
                   (กด Enter เพื่อบันทึก)
@@ -1113,7 +1100,7 @@ export default function App() {
               <input
                 ref={barcodeRef}
                 style={{
-                  ...inputStyle,
+                  ...inp,
                   border: "2px solid #40a9ff",
                   background: "#f0f9ff",
                 }}
@@ -1124,23 +1111,23 @@ export default function App() {
               />
             </div>
             <div style={{ flex: "1 1 160px" }}>
-              <label style={labelStyle}>
+              <label style={lbl}>
                 Location{" "}
                 <span style={{ color: "#8c8c8c", fontWeight: 400 }}>
                   (ระบุเพื่อแยก barcode ซ้ำ)
                 </span>
               </label>
               <input
-                style={inputStyle}
+                style={inp}
                 value={location}
                 onChange={(e) => setLocation(e.target.value)}
                 placeholder="เช่น Q14-028-40"
               />
             </div>
             <div style={{ flex: "0 0 100px" }}>
-              <label style={labelStyle}>Qty</label>
+              <label style={lbl}>Qty</label>
               <input
-                style={{ ...inputStyle, textAlign: "center" }}
+                style={{ ...inp, textAlign: "center" }}
                 type="number"
                 min="1"
                 value={qty}
@@ -1150,85 +1137,21 @@ export default function App() {
                 }}
               />
             </div>
-            <button
-              style={{ ...btnGreen, flexShrink: 0 }}
-              onClick={() => confirmPick(false)}
-            >
+            <button style={{ ...bG, flexShrink: 0 }} onClick={confirmPick}>
               ✅ ยืนยันการหยิบสินค้า
             </button>
           </div>
+
           <div style={{ marginTop: 12, fontSize: 14 }}>
             สถานะ:{" "}
             <span style={{ color: scanStatusColor, fontWeight: 600 }}>
               {scanStatus}
             </span>
           </div>
-
-          {/* Warning banner เมื่อ qty ไม่ตรง */}
-          {pendingPickData && (
-            <div
-              style={{
-                marginTop: 12,
-                background: "#fffbe6",
-                border: "1px solid #ffd666",
-                borderRadius: 10,
-                padding: "14px 18px",
-                display: "flex",
-                alignItems: "center",
-                gap: 14,
-                flexWrap: "wrap",
-              }}
-            >
-              <span style={{ fontSize: 20 }}>⚠️</span>
-              <div style={{ flex: 1 }}>
-                <div
-                  style={{ fontWeight: 700, color: "#614700", marginBottom: 4 }}
-                >
-                  จำนวนไม่ตรงกับ Order
-                </div>
-                <div style={{ fontSize: 13, color: "#614700" }}>
-                  Order <strong>{pendingPickData.matchedOrder.pickNo}</strong>{" "}
-                  ต้องหยิบอีก{" "}
-                  <strong style={{ color: "#ff4d4f" }}>
-                    {pendingPickData.remaining}
-                  </strong>{" "}
-                  ชิ้น แต่คุณกรอก{" "}
-                  <strong style={{ color: "#1677ff" }}>
-                    {pendingPickData.pickQty}
-                  </strong>{" "}
-                  ชิ้น
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  style={{ ...btnGreen, fontSize: 13, padding: "7px 14px" }}
-                  onClick={() =>
-                    executePick(
-                      pendingPickData.pickQty,
-                      pendingPickData.stockItem,
-                      pendingPickData.matchedOrder
-                    )
-                  }
-                >
-                  ✅ ยืนยัน {pendingPickData.pickQty} ชิ้น
-                </button>
-                <button
-                  style={{ ...btnGray, fontSize: 13, padding: "7px 14px" }}
-                  onClick={() => {
-                    setPendingPickData(null);
-                    setScanStatus("พร้อมสแกน");
-                    setScanStatusColor("#52c41a");
-                  }}
-                >
-                  ยกเลิก
-                </button>
-              </div>
-            </div>
-          )}
         </div>
 
-        {/* Pick Order Table */}
-        <div style={sectionCard}>
+        {/* Order table */}
+        <div style={card}>
           <div
             style={{
               display: "flex",
@@ -1246,16 +1169,13 @@ export default function App() {
             </Badge>
             <div style={{ flex: 1, minWidth: 220 }}>
               <input
-                style={{ ...inputStyle, maxWidth: 320 }}
+                style={{ ...inp, maxWidth: 320 }}
                 value={searchOrder}
                 onChange={(e) => setSearchOrder(e.target.value)}
                 placeholder="🔍 ค้นหา Pick No, ลูกค้า, สินค้า, Barcode"
               />
             </div>
-            <button
-              style={btnGreen}
-              onClick={() => setShowCompleted((v) => !v)}
-            >
+            <button style={bG} onClick={() => setShowCompleted((v) => !v)}>
               ✅ {showCompleted ? "ดูรายการค้าง" : "ดูรายการเสร็จแล้ว"}
               <span
                 style={{
@@ -1270,7 +1190,7 @@ export default function App() {
                 {showCompleted ? pendingOrders.length : completedOrders.length}
               </span>
             </button>
-            <button style={btnOrange} onClick={exportExcel}>
+            <button style={bO} onClick={exportExcel}>
               ⬇️ Export Excel
             </button>
           </div>
@@ -1340,8 +1260,8 @@ export default function App() {
                   </tr>
                 ) : (
                   filteredOrders.map((o) => {
-                    const st = getOrderStatus(o);
-                    const picked = o.picked || 0;
+                    const st = getOrderStatus(o),
+                      picked = o.picked || 0;
                     return (
                       <tr
                         key={o.id}
@@ -1469,7 +1389,7 @@ export default function App() {
                         <td
                           style={{ padding: "10px 12px", textAlign: "center" }}
                         >
-                          {formatDuration(o) ?? (
+                          {fmtDur(o) ?? (
                             <span style={{ color: "#d9d9d9", fontSize: 12 }}>
                               -
                             </span>
@@ -1480,7 +1400,7 @@ export default function App() {
                             <button
                               onClick={() => setEditOrderItem({ ...o })}
                               style={{
-                                ...btnGray,
+                                ...bGr,
                                 padding: "4px 10px",
                                 fontSize: 12,
                               }}
@@ -1495,7 +1415,7 @@ export default function App() {
                                 showAlert("ลบ Order แล้ว");
                               }}
                               style={{
-                                ...btnRed,
+                                ...bR,
                                 padding: "4px 10px",
                                 fontSize: 12,
                               }}
@@ -1527,7 +1447,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* Add Stock & Add Order */}
+        {/* Add Stock / Add Order */}
         <div
           style={{
             display: "grid",
@@ -1537,7 +1457,7 @@ export default function App() {
           }}
         >
           {/* Add Stock */}
-          <div style={sectionCard}>
+          <div style={card}>
             <div
               style={{
                 display: "flex",
@@ -1549,7 +1469,7 @@ export default function App() {
               <div style={{ fontWeight: 700, fontSize: 16 }}>📦 Add Stock</div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button
-                  style={{ ...btnGray, fontSize: 12, padding: "5px 12px" }}
+                  style={{ ...bGr, fontSize: 12, padding: "5px 12px" }}
                   onClick={downloadStockTemplate}
                 >
                   📄 Template
@@ -1562,7 +1482,7 @@ export default function App() {
                   onChange={handleStockXlsx}
                 />
                 <button
-                  style={{ ...btnGreen, fontSize: 12, padding: "5px 12px" }}
+                  style={{ ...bG, fontSize: 12, padding: "5px 12px" }}
                   onClick={() => document.getElementById("stock-xlsx").click()}
                 >
                   📤 Upload Excel
@@ -1601,23 +1521,23 @@ export default function App() {
                 ["product", "ชื่อสินค้า"],
                 ["stock", "จำนวน", "number"],
                 ["location", "Location"],
-              ].map(([key, label, type]) => (
-                <div key={key}>
-                  <label style={labelStyle}>{label}</label>
+              ].map(([k, lb, tp]) => (
+                <div key={k}>
+                  <label style={lbl}>{lb}</label>
                   <input
-                    style={inputStyle}
-                    type={type || "text"}
-                    value={addStockForm[key]}
+                    style={inp}
+                    type={tp || "text"}
+                    value={addStockForm[k]}
                     onChange={(e) =>
-                      setAddStockForm((f) => ({ ...f, [key]: e.target.value }))
+                      setAddStockForm((f) => ({ ...f, [k]: e.target.value }))
                     }
-                    placeholder={label}
+                    placeholder={lb}
                   />
                 </div>
               ))}
               <button
                 style={{
-                  ...btnPrimary,
+                  ...bP,
                   marginTop: 4,
                   width: "100%",
                   justifyContent: "center",
@@ -1630,7 +1550,7 @@ export default function App() {
           </div>
 
           {/* Add Order */}
-          <div style={sectionCard}>
+          <div style={card}>
             <div
               style={{
                 display: "flex",
@@ -1644,7 +1564,7 @@ export default function App() {
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button
-                  style={{ ...btnGray, fontSize: 12, padding: "5px 12px" }}
+                  style={{ ...bGr, fontSize: 12, padding: "5px 12px" }}
                   onClick={downloadOrderTemplate}
                 >
                   📄 Template
@@ -1657,7 +1577,7 @@ export default function App() {
                   onChange={handleOrderXlsx}
                 />
                 <button
-                  style={{ ...btnOrange, fontSize: 12, padding: "5px 12px" }}
+                  style={{ ...bO, fontSize: 12, padding: "5px 12px" }}
                   onClick={() => document.getElementById("order-xlsx").click()}
                 >
                   📤 Upload Excel
@@ -1693,9 +1613,9 @@ export default function App() {
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <div>
-                <label style={labelStyle}>Pick No (ไม่ต้องใส่ก็ได้)</label>
+                <label style={lbl}>Pick No (ไม่ต้องใส่ก็ได้)</label>
                 <input
-                  style={inputStyle}
+                  style={inp}
                   value={addOrderForm.pickNo}
                   onChange={(e) =>
                     setAddOrderForm((f) => ({ ...f, pickNo: e.target.value }))
@@ -1704,9 +1624,9 @@ export default function App() {
                 />
               </div>
               <div>
-                <label style={labelStyle}>ชื่อลูกค้า</label>
+                <label style={lbl}>ชื่อลูกค้า</label>
                 <input
-                  style={inputStyle}
+                  style={inp}
                   value={addOrderForm.customer}
                   onChange={(e) =>
                     setAddOrderForm((f) => ({ ...f, customer: e.target.value }))
@@ -1715,17 +1635,17 @@ export default function App() {
                 />
               </div>
               <div>
-                <label style={labelStyle}>Barcode *</label>
+                <label style={lbl}>Barcode *</label>
                 <input
                   style={{
-                    ...inputStyle,
+                    ...inp,
                     border:
                       addOrderForm.barcode &&
                       stock.find(
                         (s) => s.barcode === addOrderForm.barcode.trim()
                       )
                         ? "2px solid #52c41a"
-                        : inputStyle.border,
+                        : inp.border,
                   }}
                   value={addOrderForm.barcode}
                   onChange={(e) => {
@@ -1767,9 +1687,9 @@ export default function App() {
                   })()}
               </div>
               <div>
-                <label style={labelStyle}>ชื่อสินค้า *</label>
+                <label style={lbl}>ชื่อสินค้า *</label>
                 <input
-                  style={inputStyle}
+                  style={inp}
                   value={addOrderForm.product}
                   onChange={(e) =>
                     setAddOrderForm((f) => ({ ...f, product: e.target.value }))
@@ -1778,9 +1698,9 @@ export default function App() {
                 />
               </div>
               <div>
-                <label style={labelStyle}>Location</label>
+                <label style={lbl}>Location</label>
                 <input
-                  style={inputStyle}
+                  style={inp}
                   value={addOrderForm.location}
                   onChange={(e) =>
                     setAddOrderForm((f) => ({ ...f, location: e.target.value }))
@@ -1789,9 +1709,9 @@ export default function App() {
                 />
               </div>
               <div>
-                <label style={labelStyle}>จำนวนที่ต้องหยิบ</label>
+                <label style={lbl}>จำนวนที่ต้องหยิบ</label>
                 <input
-                  style={inputStyle}
+                  style={inp}
                   type="number"
                   min="1"
                   value={addOrderForm.required}
@@ -1803,7 +1723,7 @@ export default function App() {
               </div>
               <button
                 style={{
-                  ...btnOrange,
+                  ...bO,
                   marginTop: 4,
                   width: "100%",
                   justifyContent: "center",
@@ -1816,8 +1736,8 @@ export default function App() {
           </div>
         </div>
 
-        {/* Stock Table */}
-        <div style={sectionCard}>
+        {/* Stock table */}
+        <div style={card}>
           <div
             style={{
               display: "flex",
@@ -1831,14 +1751,14 @@ export default function App() {
             </span>
             <div style={{ flex: 1 }}>
               <input
-                style={{ ...inputStyle, maxWidth: 280 }}
+                style={{ ...inp, maxWidth: 280 }}
                 value={stockSearch}
                 onChange={(e) => setStockSearch(e.target.value)}
                 placeholder="ค้นหา Stock..."
               />
             </div>
             <button
-              style={btnRed}
+              style={bR}
               onClick={() => {
                 if (window.confirm("ลบ Stock ทั้งหมด?")) {
                   updateStock([]);
@@ -1912,11 +1832,7 @@ export default function App() {
                               _originalBarcode: s.barcode,
                             })
                           }
-                          style={{
-                            ...btnPrimary,
-                            padding: "5px 14px",
-                            fontSize: 13,
-                          }}
+                          style={{ ...bP, padding: "5px 14px", fontSize: 13 }}
                         >
                           ✏️ แก้ไข
                         </button>
@@ -1927,11 +1843,7 @@ export default function App() {
                             );
                             showAlert("ลบสินค้าแล้ว");
                           }}
-                          style={{
-                            ...btnRed,
-                            padding: "5px 14px",
-                            fontSize: 13,
-                          }}
+                          style={{ ...bR, padding: "5px 14px", fontSize: 13 }}
                         >
                           🗑️ ลบ
                         </button>
@@ -1972,18 +1884,18 @@ export default function App() {
               ["product", "ชื่อสินค้า"],
               ["stock", "จำนวน", "number"],
               ["location", "Location"],
-            ].map(([key, label, type]) => (
-              <div key={key}>
-                <label style={labelStyle}>{label}</label>
+            ].map(([k, lb, tp]) => (
+              <div key={k}>
+                <label style={lbl}>{lb}</label>
                 <input
-                  style={inputStyle}
-                  type={type || "text"}
-                  value={editStockItem[key]}
+                  style={inp}
+                  type={tp || "text"}
+                  value={editStockItem[k]}
                   onChange={(e) =>
                     setEditStockItem((f) => ({
                       ...f,
-                      [key]:
-                        type === "number"
+                      [k]:
+                        tp === "number"
                           ? Number(e.target.value)
                           : e.target.value,
                     }))
@@ -1992,14 +1904,11 @@ export default function App() {
               </div>
             ))}
             <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-              <button
-                style={{ ...btnPrimary, flex: 1 }}
-                onClick={handleEditStock}
-              >
+              <button style={{ ...bP, flex: 1 }} onClick={handleEditStock}>
                 💾 บันทึก
               </button>
               <button
-                style={{ ...btnGray, flex: 1 }}
+                style={{ ...bGr, flex: 1 }}
                 onClick={() => setEditStockItem(null)}
               >
                 ยกเลิก
@@ -2025,18 +1934,18 @@ export default function App() {
               ["location", "Location"],
               ["required", "จำนวนที่ต้องหยิบ", "number"],
               ["picked", "หยิบแล้ว", "number"],
-            ].map(([key, label, type]) => (
-              <div key={key}>
-                <label style={labelStyle}>{label}</label>
+            ].map(([k, lb, tp]) => (
+              <div key={k}>
+                <label style={lbl}>{lb}</label>
                 <input
-                  style={inputStyle}
-                  type={type || "text"}
-                  value={editOrderItem[key] ?? ""}
+                  style={inp}
+                  type={tp || "text"}
+                  value={editOrderItem[k] ?? ""}
                   onChange={(e) =>
                     setEditOrderItem((f) => ({
                       ...f,
-                      [key]:
-                        type === "number"
+                      [k]:
+                        tp === "number"
                           ? Number(e.target.value)
                           : e.target.value,
                     }))
@@ -2045,9 +1954,9 @@ export default function App() {
               </div>
             ))}
             <div>
-              <label style={labelStyle}>Status</label>
+              <label style={lbl}>Status</label>
               <select
-                style={inputStyle}
+                style={inp}
                 value={editOrderItem.status}
                 onChange={(e) =>
                   setEditOrderItem((f) => ({ ...f, status: e.target.value }))
@@ -2073,14 +1982,11 @@ export default function App() {
                 </div>
               )}
             <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-              <button
-                style={{ ...btnPrimary, flex: 1 }}
-                onClick={handleEditOrder}
-              >
+              <button style={{ ...bP, flex: 1 }} onClick={handleEditOrder}>
                 💾 บันทึก
               </button>
               <button
-                style={{ ...btnGray, flex: 1 }}
+                style={{ ...bGr, flex: 1 }}
                 onClick={() => setEditOrderItem(null)}
               >
                 ยกเลิก
@@ -2228,13 +2134,13 @@ export default function App() {
             </div>
             <div style={{ display: "flex", gap: 10 }}>
               <button
-                style={{ ...btnGreen, flex: 1, justifyContent: "center" }}
+                style={{ ...bG, flex: 1, justifyContent: "center" }}
                 onClick={confirmXlsxImport}
               >
                 ✅ ยืนยันนำเข้า {xlsxPreview.rows.length} รายการ
               </button>
               <button
-                style={{ ...btnGray, flex: 1, justifyContent: "center" }}
+                style={{ ...bGr, flex: 1, justifyContent: "center" }}
                 onClick={() => setXlsxPreview(null)}
               >
                 ยกเลิก
@@ -2255,7 +2161,7 @@ export default function App() {
         </p>
         <div style={{ display: "flex", gap: 10 }}>
           <button
-            style={{ ...btnRed, flex: 1 }}
+            style={{ ...bR, flex: 1 }}
             onClick={() => {
               const today = new Date().toLocaleDateString("th-TH");
               updateOrders((prev) =>
@@ -2272,7 +2178,7 @@ export default function App() {
             ยืนยันล้างข้อมูล
           </button>
           <button
-            style={{ ...btnGray, flex: 1 }}
+            style={{ ...bGr, flex: 1 }}
             onClick={() => setConfirmClear(false)}
           >
             ยกเลิก
@@ -2282,9 +2188,9 @@ export default function App() {
 
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700;800&display=swap');
-        * { box-sizing: border-box; }
-        input:focus, select:focus { border-color: #40a9ff !important; outline: none; box-shadow: 0 0 0 2px rgba(24,144,255,0.15); }
-        @keyframes fadein { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+        * { box-sizing:border-box; }
+        input:focus,select:focus { border-color:#40a9ff !important; outline:none; box-shadow:0 0 0 2px rgba(24,144,255,0.15); }
+        @keyframes fadein { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
       `}</style>
     </div>
   );
