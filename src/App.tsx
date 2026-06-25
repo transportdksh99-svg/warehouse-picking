@@ -318,12 +318,16 @@ export default function App() {
       return;
     }
 
-    const actualQty = Math.min(pickQty, remaining);
-    if (actualQty < pickQty) {
-      showAlert(`⚠️ ปรับ Qty จาก ${pickQty} → ${actualQty} ชิ้น (เหลือแค่ ${remaining} ชิ้น)`, "warning");
+    // ✅ บล็อกถ้า qty เกิน remaining — ไม่อนุญาตให้หยิบเกินจำนวนที่ต้องการ
+    if (pickQty > remaining) {
+      playSound("error");
+      setScanStatus(`❌ หยิบเกิน — ต้องการอีกแค่ ${remaining} ชิ้น แต่กรอก ${pickQty} ชิ้น`);
+      setScanStatusColor("#ff4d4f");
+      showAlert(`❌ หยิบไม่ได้ — Order ${matchedOrder.pickNo} ต้องการอีกแค่ ${remaining} ชิ้น`, "error");
+      return;
     }
 
-    executePick(actualQty, stockItem, matchedOrder);
+    executePick(pickQty, stockItem, matchedOrder);
   }
 
   function handleBarcodeKeyDown(e) {
