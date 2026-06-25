@@ -43,7 +43,6 @@ function Badge({ children, color = "gray" }) {
     </span>
   );
 }
-
 function StatCard({ icon, value, label, color = "#1677ff" }) {
   return (
     <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0",
@@ -59,7 +58,6 @@ function StatCard({ icon, value, label, color = "#1677ff" }) {
     </div>
   );
 }
-
 function Modal({ open, onClose, title, children }) {
   if (!open) return null;
   return (
@@ -119,12 +117,23 @@ export default function App() {
 
   const barcodeRef = useRef();
 
+  // ✅ KEY FIX: pickedCache เก็บ picked จริงๆ แบบ real-time
+  // ป้องกัน race condition เมื่อสแกนเร็วก่อน Firebase sync กลับมา
+  const pickedCache = useRef({}); // { orderId: pickedCount }
+
   // ── Firebase ────────────────────────────────────────────────────────────────
   useEffect(() => {
     let sL = false, oL = false;
     const check = () => { if (sL && oL) setDbReady(true); };
     const u1 = onValue(dbRef(db, "stock"),  (s) => { setStock(s.val()  ? Object.values(s.val()) : []); sL = true; check(); });
-    const u2 = onValue(dbRef(db, "orders"), (s) => { setOrders(s.val() ? Object.values(s.val()) : []); oL = true; check(); });
+    const u2 = onValue(dbRef(db, "orders"), (s) => {
+      const vals = s.val() ? Object.values(s.val()) : [];
+      // ✅ sync cache กับ Firebase เสมอ
+      vals.forEach((o) => { pickedCache.current[o.id] = o.picked || 0; });
+      setOrders(vals);
+      oL = true;
+      check();
+    });
     return () => { u1(); u2(); };
   }, []);
 
@@ -211,13 +220,30 @@ export default function App() {
 
   // ── executePick ──────────────────────────────────────────────────────────────
   function executePick(pickQty, stockItem, matchedOrder) {
+    // ✅ อ่านจาก cache (ค่าล่าสุด) แทน state (อาจ stale)
+    const cachedPicked = pickedCache.current[matchedOrder.id] ?? (matchedOrder.picked || 0);
+    const remaining    = matchedOrder.required - cachedPicked;
+
+    // ✅ Double-lock: บล็อกอีกครั้งถ้า cache บอกว่าครบแล้ว
+    if (remaining <= 0) {
+      playSound("error");
+      setScanStatus(`❌ Order ${matchedOrder.pickNo} หยิบครบแล้ว — ไม่สามารถหยิบเพิ่มได้`);
+      setScanStatusColor("#ff4d4f");
+      showAlert(`❌ Order ${matchedOrder.pickNo} หยิบครบแล้ว (${cachedPicked}/${matchedOrder.required} ชิ้น)`, "error");
+      return;
+    }
+
+    const safeQty    = Math.min(pickQty, remaining);
+    const newPicked  = cachedPicked + safeQty;
+    const isComplete = newPicked >= matchedOrder.required;
+
+    // ✅ อัปเดต cache ทันทีก่อน Firebase — ป้องกันสแกนซ้ำก่อน sync
+    pickedCache.current[matchedOrder.id] = newPicked;
+
     updateStock((prev) =>
-      prev.map((s) => s.barcode === stockItem.barcode ? { ...s, stock: s.stock - pickQty } : s)
+      prev.map((s) => s.barcode === stockItem.barcode ? { ...s, stock: s.stock - safeQty } : s)
     );
 
-    const newPicked      = (matchedOrder.picked || 0) + pickQty;
-    const isComplete     = newPicked >= matchedOrder.required;
-    const remaining      = matchedOrder.required - newPicked;
     const completedAt    = isComplete ? now()                    : undefined;
     const completedAtRaw = isComplete ? new Date().toISOString() : undefined;
 
@@ -231,13 +257,14 @@ export default function App() {
 
     if (isComplete) {
       playSound("success");
-      setScanStatus(`✅ หยิบครบ: ${stockItem.product} x${pickQty}`);
+      setScanStatus(`✅ หยิบครบ: ${stockItem.product} x${safeQty}`);
       setScanStatusColor("#52c41a");
     } else {
       playSound("warning");
-      setScanStatus(`⚠️ หยิบบางส่วน: ${stockItem.product} x${pickQty} — ยังต้องหยิบอีก ${remaining} ชิ้น`);
+      const stillLeft = matchedOrder.required - newPicked;
+      setScanStatus(`⚠️ หยิบบางส่วน: ${stockItem.product} x${safeQty} — ยังต้องหยิบอีก ${stillLeft} ชิ้น`);
       setScanStatusColor("#fa8c16");
-      showAlert(`⚠️ Order ${matchedOrder.pickNo} — หยิบแล้ว ${newPicked}/${matchedOrder.required} เหลืออีก ${remaining} ชิ้น`, "warning");
+      showAlert(`⚠️ Order ${matchedOrder.pickNo} — หยิบแล้ว ${newPicked}/${matchedOrder.required} เหลืออีก ${stillLeft} ชิ้น`, "warning");
     }
 
     setBarcode(""); setLocation(""); setQty(1);
@@ -265,7 +292,6 @@ export default function App() {
       playSound("error"); setScanStatus(`❌ สต็อกไม่เพียงพอ (มี ${stockItem.stock} ชิ้น)`); setScanStatusColor("#ff4d4f"); return;
     }
 
-    // หา Order ที่ตรงกัน
     let matchedOrder = null;
     if (pickNo.trim()) {
       matchedOrder = orders.find((o) => o.pickNo === pickNo.trim() && o.barcode === barcode.trim() && o.status !== "COMPLETE");
@@ -273,7 +299,6 @@ export default function App() {
       matchedOrder = orders.find((o) => o.barcode === barcode.trim() && o.status !== "COMPLETE");
     }
 
-    // ✅ ต้องมี Order — ห้ามตัด Stock โดยไม่มี Order
     if (!matchedOrder) {
       playSound("error");
       setScanStatus("❌ ไม่พบ Order ที่ตรงกับ Barcode นี้");
@@ -281,18 +306,18 @@ export default function App() {
       return;
     }
 
-    const alreadyPicked = matchedOrder.picked || 0;
-    const remaining     = matchedOrder.required - alreadyPicked;
+    // ✅ ใช้ cache แทน state — แม่นยำแม้ Firebase ยัง sync ไม่ทัน
+    const cachedPicked = pickedCache.current[matchedOrder.id] ?? (matchedOrder.picked || 0);
+    const remaining    = matchedOrder.required - cachedPicked;
 
-    // ✅ บล็อกถ้าหยิบครบแล้ว
     if (remaining <= 0) {
       playSound("error");
-      setScanStatus(`❌ Order นี้หยิบครบแล้ว (${alreadyPicked}/${matchedOrder.required} ชิ้น)`);
+      setScanStatus(`❌ Order ${matchedOrder.pickNo} หยิบครบแล้ว — ไม่สามารถหยิบเพิ่มได้`);
       setScanStatusColor("#ff4d4f");
+      showAlert(`❌ Order ${matchedOrder.pickNo} หยิบครบแล้ว (${cachedPicked}/${matchedOrder.required} ชิ้น)`, "error");
       return;
     }
 
-    // ✅ Cap qty ไม่ให้เกิน remaining — ป้องกันหยิบเกิน
     const actualQty = Math.min(pickQty, remaining);
     if (actualQty < pickQty) {
       showAlert(`⚠️ ปรับ Qty จาก ${pickQty} → ${actualQty} ชิ้น (เหลือแค่ ${remaining} ชิ้น)`, "warning");
@@ -313,13 +338,14 @@ export default function App() {
   function handleEditOrder() {
     const original = orders.find((o) => o.id === editOrderItem.id);
     if (!original) { showAlert("ไม่พบ Order นี้ในระบบ", "error"); return; }
-
     const isNowComplete = editOrderItem.status === "COMPLETE" && original.status !== "COMPLETE";
     const updated = cleanObj({
       ...editOrderItem,
       completedAt:    isNowComplete ? now()                    : (editOrderItem.completedAt    ?? original.completedAt),
       completedAtRaw: isNowComplete ? new Date().toISOString() : (editOrderItem.completedAtRaw ?? original.completedAtRaw),
     });
+    // ✅ sync cache ด้วยเมื่อแก้ picked ผ่าน modal
+    pickedCache.current[updated.id] = updated.picked || 0;
     updateOrders((prev) => prev.map((o) => o.id === updated.id ? updated : o));
     setEditOrderItem(null);
     showAlert("แก้ไข Order สำเร็จ");
@@ -356,11 +382,9 @@ export default function App() {
     const { customer, barcode: bc, product, location: loc, required } = addOrderForm;
     if (!bc || !product) { showAlert("กรุณากรอก Barcode และชื่อสินค้า", "error"); return; }
     const id = generateId();
-    updateOrders((prev) => [...prev, cleanObj({
-      id, pickNo: addOrderForm.pickNo || id, customer, barcode: bc, product,
-      location: loc, required: Number(required) || 1, picked: 0, status: "PENDING",
-      createdAt: now(), createdAtRaw: new Date().toISOString(),
-    })]);
+    const newOrder = cleanObj({ id, pickNo: addOrderForm.pickNo || id, customer, barcode: bc, product, location: loc, required: Number(required) || 1, picked: 0, status: "PENDING", createdAt: now(), createdAtRaw: new Date().toISOString() });
+    pickedCache.current[id] = 0;
+    updateOrders((prev) => [...prev, newOrder]);
     setAddOrderForm({ pickNo: "", customer: "", barcode: "", product: "", location: "", required: 1 });
     showAlert("เพิ่ม Order สำเร็จ");
   }
@@ -391,8 +415,15 @@ export default function App() {
     const file = e.target.files[0]; if (!file) return;
     const r = new FileReader();
     r.onload = (ev) => {
-      try { const d = JSON.parse(ev.target.result); if (d.stock) updateStock(d.stock); if (d.orders) updateOrders(d.orders); showAlert("Restore สำเร็จ"); }
-      catch { showAlert("ไฟล์ไม่ถูกต้อง", "error"); }
+      try {
+        const d = JSON.parse(ev.target.result);
+        if (d.stock)  updateStock(d.stock);
+        if (d.orders) {
+          d.orders.forEach((o) => { pickedCache.current[o.id] = o.picked || 0; });
+          updateOrders(d.orders);
+        }
+        showAlert("Restore สำเร็จ");
+      } catch { showAlert("ไฟล์ไม่ถูกต้อง", "error"); }
     };
     r.readAsText(file); e.target.value = "";
   }
@@ -443,11 +474,13 @@ export default function App() {
       });
       showAlert(`นำเข้าสต็อกสำเร็จ ${xlsxPreview.rows.length} รายการ`);
     } else {
-      updateOrders((prev) => [...prev, ...xlsxPreview.rows.map((r) => {
+      const newOrders = xlsxPreview.rows.map((r) => {
         const id = generateId();
+        pickedCache.current[id] = 0;
         return cleanObj({ id, pickNo: r.pickNo || id, customer: r.customer, barcode: r.barcode, product: r.product, location: r.location, required: r.required, picked: 0, status: "PENDING", createdAt: now(), createdAtRaw: new Date().toISOString() });
-      })]);
-      showAlert(`นำเข้า Order สำเร็จ ${xlsxPreview.rows.length} รายการ`);
+      });
+      updateOrders((prev) => [...prev, ...newOrders]);
+      showAlert(`นำเข้า Order สำเร็จ ${newOrders.length} รายการ`);
     }
     setXlsxPreview(null);
   }
@@ -455,8 +488,8 @@ export default function App() {
   function fmtDur(o) {
     if (!o.completedAtRaw || !o.createdAtRaw) return null;
     const s = Math.round((new Date(o.completedAtRaw) - new Date(o.createdAtRaw)) / 1000), m = Math.floor(s / 60);
-    if (s < 60)  return <span style={{ color: "#722ed1", fontWeight: 700, fontSize: 13 }}>{s} วิ</span>;
-    if (m < 60)  return <span style={{ color: "#52c41a", fontWeight: 700, fontSize: 13 }}>{m} นาที</span>;
+    if (s < 60) return <span style={{ color: "#722ed1", fontWeight: 700, fontSize: 13 }}>{s} วิ</span>;
+    if (m < 60) return <span style={{ color: "#52c41a", fontWeight: 700, fontSize: 13 }}>{m} นาที</span>;
     return <span style={{ color: "#fa8c16", fontWeight: 700, fontSize: 13 }}>{Math.floor(m / 60)}ชม. {m % 60}น.</span>;
   }
 
@@ -471,11 +504,9 @@ export default function App() {
 
   const alertBg = alertMsg?.type === "error" ? "#ff4d4f" : alertMsg?.type === "warning" ? "#fa8c16" : "#52c41a";
 
-  // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <div style={{ background: "#f7f8fa", minHeight: "100vh", fontFamily: "'Noto Sans Thai',sans-serif", color: "#262626" }}>
 
-      {/* Toast */}
       {alertMsg && (
         <div style={{ position: "fixed", top: 20, right: 20, zIndex: 2000, background: alertBg, color: "#fff",
           borderRadius: 10, padding: "12px 22px", fontWeight: 600, fontSize: 14,
@@ -515,15 +546,12 @@ export default function App() {
               ⚡ Auto Confirm {autoConfirm ? "เปิดอยู่" : "ปิดอยู่"}
             </button>
           </div>
-
           <div style={{ background: "#fffbe6", border: "1px solid #ffe58f", borderRadius: 8, padding: "8px 14px", marginBottom: 16, fontSize: 13, color: "#614700" }}>
-            💡 วิธีใช้: กรอก Pick No → สแกน/กรอก Barcode แล้วกด Enter — ระบบจะบันทึกการหยิบอัตโนมัติทันที
-            <br />
+            💡 วิธีใช้: กรอก Pick No → สแกน/กรอก Barcode แล้วกด Enter<br />
             <span style={{ color: "#cf1322", fontWeight: 600 }}>
-              ⚠️ ต้องมี Order ตรงกันก่อนหยิบ — ระบบจะ cap จำนวนไม่ให้เกิน Required อัตโนมัติ
+              ⚠️ ระบบจะบล็อกทันทีถ้าหยิบครบ Required แล้ว — ไม่สามารถหยิบเกินได้
             </span>
           </div>
-
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
             <div style={{ flex: "1 1 180px" }}>
               <label style={lbl}>Pick No</label>
@@ -538,7 +566,7 @@ export default function App() {
                 placeholder="สแกนหรือกรอก Barcode ที่นี่" onKeyDown={handleBarcodeKeyDown} />
             </div>
             <div style={{ flex: "1 1 160px" }}>
-              <label style={lbl}>Location <span style={{ color: "#8c8c8c", fontWeight: 400 }}>(ระบุเพื่อแยก barcode ซ้ำ)</span></label>
+              <label style={lbl}>Location</label>
               <input style={inp} value={location} onChange={(e) => setLocation(e.target.value)} placeholder="เช่น Q14-028-40" />
             </div>
             <div style={{ flex: "0 0 100px" }}>
@@ -548,7 +576,6 @@ export default function App() {
             </div>
             <button style={{ ...bG, flexShrink: 0 }} onClick={confirmPick}>✅ ยืนยันการหยิบสินค้า</button>
           </div>
-
           <div style={{ marginTop: 12, fontSize: 14 }}>
             สถานะ: <span style={{ color: scanStatusColor, fontWeight: 600 }}>{scanStatus}</span>
           </div>
@@ -589,8 +616,9 @@ export default function App() {
                   </td></tr>
                 ) : filteredOrders.map((o) => {
                   const st = getOrderStatus(o), picked = o.picked || 0;
+                  const isOver = picked > o.required;
                   return (
-                    <tr key={o.id} style={{ borderBottom: "1px solid #f5f5f5" }}>
+                    <tr key={o.id} style={{ borderBottom: "1px solid #f5f5f5", background: isOver ? "#fff1f0" : "transparent" }}>
                       <td style={{ padding: "10px 12px", fontWeight: 600, color: "#1677ff" }}>{o.pickNo}</td>
                       <td style={{ padding: "10px 12px" }}>{o.customer || "-"}</td>
                       <td style={{ padding: "10px 12px", fontFamily: "monospace" }}>{o.barcode}</td>
@@ -598,13 +626,13 @@ export default function App() {
                       <td style={{ padding: "10px 12px" }}>{o.location || "-"}</td>
                       <td style={{ padding: "10px 12px", textAlign: "center" }}>{o.required}</td>
                       <td style={{ padding: "10px 12px", textAlign: "center",
-                        color: picked > o.required ? "#ff4d4f" : picked >= o.required ? "#52c41a" : "#fa8c16",
-                        fontWeight: 600 }}>{picked}</td>
+                        color: isOver ? "#ff4d4f" : picked >= o.required ? "#52c41a" : "#fa8c16",
+                        fontWeight: 700 }}>{picked}</td>
                       <td style={{ padding: "10px 12px" }}>
                         <Badge color={st === "complete" ? "complete" : st === "over3h" ? "over3h" : "pending"}>{o.status}</Badge>
                       </td>
                       <td style={{ padding: "10px 12px" }}>
-                        {picked > o.required
+                        {isOver
                           ? <span style={{ color: "#ff4d4f", fontWeight: 600 }}>⚠️ หยิบเกิน</span>
                           : st === "over3h" ? <span style={{ color: "#ff4d4f", fontWeight: 600 }}>⚠️ เกิน 3ชม.</span>
                           : "-"}
@@ -646,8 +674,6 @@ export default function App() {
 
         {/* Add Stock / Add Order */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
-
-          {/* Add Stock */}
           <div style={card}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
               <div style={{ fontWeight: 700, fontSize: 16 }}>📦 Add Stock</div>
@@ -666,17 +692,13 @@ export default function App() {
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {[["barcode","Barcode"],["product","ชื่อสินค้า"],["stock","จำนวน","number"],["location","Location"]].map(([k, lb, tp]) => (
-                <div key={k}>
-                  <label style={lbl}>{lb}</label>
-                  <input style={inp} type={tp || "text"} value={addStockForm[k]}
-                    onChange={(e) => setAddStockForm((f) => ({ ...f, [k]: e.target.value }))} placeholder={lb} />
-                </div>
+                <div key={k}><label style={lbl}>{lb}</label>
+                  <input style={inp} type={tp || "text"} value={addStockForm[k]} onChange={(e) => setAddStockForm((f) => ({ ...f, [k]: e.target.value }))} placeholder={lb} /></div>
               ))}
               <button style={{ ...bP, marginTop: 4, width: "100%", justifyContent: "center" }} onClick={handleAddStock}>➕ เพิ่มสต็อก</button>
             </div>
           </div>
 
-          {/* Add Order */}
           <div style={card}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
               <div style={{ fontWeight: 700, fontSize: 16 }}>📋 Add Pick Order</div>
